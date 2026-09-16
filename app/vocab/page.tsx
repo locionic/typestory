@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { VOCAB_BANKS, VocabCategory } from '../../data/vocab';
 import { useTypingStore } from '../../store/useTypingStore';
 import TypingEngine from '../../components/typing/TypingEngine';
-import { Bookmark, Volume2, ChevronRight, ChevronLeft, Sparkles, Check } from 'lucide-react';
+import { Bookmark, Volume2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { soundEngine } from '../../lib/audio';
 
 export default function VocabPage() {
@@ -147,7 +147,10 @@ export default function VocabPage() {
       </div>
 
       {/* Typing & Microphone Assessment Engine */}
-      <TypingEngine />
+      <TypingEngine
+        onNext={currentWordIndex < words.length - 1 ? handleNext : undefined}
+        nextLabel="Next Word"
+      />
     </div>
   );
 }

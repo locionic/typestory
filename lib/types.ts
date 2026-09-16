@@ -35,3 +35,30 @@ export interface SpeechEvaluationResult {
 }
 
 export type SwitchSound = 'blue' | 'brown' | 'bubble' | 'mute';
+
+export interface TypingSessionRecord {
+  id: string;
+  timestamp: number;
+  dateStr: string; // YYYY-MM-DD
+  title: string;
+  sourceType: 'story' | 'vocab' | 'custom';
+  wpm: number;
+  accuracy: number;
+  durationSeconds: number;
+  wordsCount: number;
+  keystrokes: number;
+}
+
+export interface UserStats {
+  sessions: TypingSessionRecord[];
+  dailyStreak: {
+    currentStreak: number;
+    bestStreak: number;
+    lastActiveDate: string; // YYYY-MM-DD
+  };
+  totalWordsTyped: number;
+  totalTimeSpentSeconds: number;
+  bestWpm: number;
+  averageWpm: number;
+  averageAccuracy: number;
+}

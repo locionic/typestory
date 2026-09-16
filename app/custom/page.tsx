@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useTypingStore } from '../../store/useTypingStore';
 import TypingEngine from '../../components/typing/TypingEngine';
-import { FileText, Play, Sparkles, BookOpen } from 'lucide-react';
+import { FileText, Play } from 'lucide-react';
 
 const SAMPLES = [
   {

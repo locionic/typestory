@@ -2,20 +2,27 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { RotateCcw, Zap, Target, CheckCircle2, Play, Volume2 } from 'lucide-react';
+import { RotateCcw, Zap, Target, CheckCircle2, Volume2, Keyboard } from 'lucide-react';
 import { useTypingStore } from '../../store/useTypingStore';
 import MicAssessment from '../voice/MicAssessment';
+import VirtualKeyboard from './VirtualKeyboard';
 import { soundEngine } from '../../lib/audio';
+import { recordCompletedSession } from '../../lib/stats';
 
-export default function TypingEngine() {
+interface TypingEngineProps {
+  onNext?: () => void;
+  nextLabel?: string;
+}
+
+export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngineProps) {
   const {
     title,
+    sourceType,
     targetText,
     typedText,
     startTime,
     totalKeystrokes,
     correctKeystrokes,
-    incorrectKeystrokes,
     isCompleted,
     handleKeyInput,
     handleBackspace,
@@ -24,6 +31,25 @@ export default function TypingEngine() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [showKeyboard, setShowKeyboard] = useState(true);
+  const hasRecordedRef = useRef(false);
+
+  // Calculate live metrics
+  const liveElapsed = startTime ? elapsedSeconds : 0;
+  const wpm =
+    liveElapsed > 0
+      ? Math.round((correctKeystrokes / 5) / (liveElapsed / 60))
+      : 0;
+
+  const accuracy =
+    totalKeystrokes > 0
+      ? Math.round((correctKeystrokes / totalKeystrokes) * 100)
+      : 100;
+
+  const progress =
+    targetText.length > 0
+      ? Math.min(100, Math.round((typedText.length / targetText.length) * 100))
+      : 0;
 
   // Live timer tick
   useEffect(() => {
@@ -36,21 +62,42 @@ export default function TypingEngine() {
     return () => clearInterval(interval);
   }, [startTime, isCompleted]);
 
-  // Reset timer on restart
+  // Confetti on completion & persistent stats recording
   useEffect(() => {
-    if (!startTime) {
-      setElapsedSeconds(0);
-    }
-  }, [startTime]);
-
-  // Confetti on completion
-  useEffect(() => {
-    if (isCompleted) {
+    if (isCompleted && !hasRecordedRef.current) {
+      hasRecordedRef.current = true;
       confetti({
         particleCount: 80,
         spread: 70,
         origin: { y: 0.6 },
       });
+
+      const wordsCount = targetText.trim().split(/\s+/).filter(Boolean).length;
+      recordCompletedSession({
+        title,
+        sourceType,
+        wpm,
+        accuracy,
+        durationSeconds: liveElapsed,
+        wordsCount,
+        keystrokes: totalKeystrokes,
+      });
+    }
+  }, [
+    isCompleted,
+    title,
+    sourceType,
+    targetText,
+    wpm,
+    accuracy,
+    liveElapsed,
+    totalKeystrokes,
+  ]);
+
+  // Reset recording guard on session reset
+  useEffect(() => {
+    if (!isCompleted) {
+      hasRecordedRef.current = false;
     }
   }, [isCompleted]);
 
@@ -71,6 +118,12 @@ export default function TypingEngine() {
         return;
       }
 
+      if (isCompleted && e.key === 'Enter' && onNext) {
+        e.preventDefault();
+        onNext();
+        return;
+      }
+
       // Single printable characters
       if (e.key.length === 1) {
         e.preventDefault();
@@ -80,23 +133,7 @@ export default function TypingEngine() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyInput, handleBackspace, resetSession]);
-
-  // Calculate live metrics
-  const wpm =
-    elapsedSeconds > 0
-      ? Math.round((correctKeystrokes / 5) / (elapsedSeconds / 60))
-      : 0;
-
-  const accuracy =
-    totalKeystrokes > 0
-      ? Math.round((correctKeystrokes / totalKeystrokes) * 100)
-      : 100;
-
-  const progress =
-    targetText.length > 0
-      ? Math.min(100, Math.round((typedText.length / targetText.length) * 100))
-      : 0;
+  }, [handleKeyInput, handleBackspace, resetSession, isCompleted, onNext]);
 
   return (
     <div className="flex flex-col gap-6" ref={containerRef}>
@@ -139,6 +176,19 @@ export default function TypingEngine() {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowKeyboard((prev) => !prev)}
+            title="Toggle touch-typing virtual keyboard"
+            className={`flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+              showKeyboard
+                ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-950/40 dark:text-indigo-300'
+                : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800'
+            }`}
+          >
+            <Keyboard className="h-3.5 w-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">Keyboard</span>
+          </button>
           <button
             type="button"
             onClick={() => soundEngine.speak(targetText)}
@@ -206,21 +256,35 @@ export default function TypingEngine() {
               You typed at <span className="font-bold">{wpm} WPM</span> with{' '}
               <span className="font-bold">{accuracy}% accuracy</span>.
             </p>
-            <div className="mt-4 flex justify-center gap-3">
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
                 type="button"
                 onClick={resetSession}
-                className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md transition hover:bg-emerald-500"
+                className="rounded-xl border border-emerald-600/40 bg-white/80 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50 dark:border-emerald-700/50 dark:bg-gray-850 dark:text-emerald-300 dark:hover:bg-gray-800"
               >
                 Practice Again
               </button>
+              {onNext && (
+                <button
+                  type="button"
+                  onClick={onNext}
+                  className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md transition hover:bg-emerald-500"
+                >
+                  <span>{nextLabel} (Enter ↵)</span>
+                </button>
+              )}
             </div>
           </div>
         )}
       </div>
 
+      {/* Touch-typing Interactive Virtual Keyboard */}
+      {showKeyboard && (
+        <VirtualKeyboard expectedChar={targetText[typedText.length]} />
+      )}
+
       {/* Microphone Voice Pronunciation Assessment */}
-      <MicAssessment targetText={targetText} />
+      <MicAssessment key={targetText} targetText={targetText} />
     </div>
   );
 }

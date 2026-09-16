@@ -1,14 +1,44 @@
 import { SpeechEvaluationResult } from './types';
 
 // Web Speech API interface definitions
+interface SpeechRecognitionResultItem {
+  readonly transcript: string;
+}
+
+interface ISpeechRecognitionEvent {
+  results: {
+    [index: number]: {
+      [index: number]: SpeechRecognitionResultItem;
+    };
+  };
+}
+
+interface ISpeechRecognitionErrorEvent {
+  error: string;
+  message?: string;
+}
+
+interface ISpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: ISpeechRecognitionEvent) => void) | null;
+  onerror: ((event: ISpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => ISpeechRecognitionInstance;
+
 interface IWindowSpeech extends Window {
-  SpeechRecognition?: any;
-  webkitSpeechRecognition?: any;
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
 }
 
 export function isSpeechRecognitionSupported(): boolean {
   if (typeof window === 'undefined') return false;
-  const win = window as IWindowSpeech;
+  const win = window as unknown as IWindowSpeech;
   return !!(win.SpeechRecognition || win.webkitSpeechRecognition);
 }
 
@@ -76,7 +106,7 @@ export function evaluatePronunciation(
 }
 
 export class SpeechRecorder {
-  private recognition: any = null;
+  private recognition: ISpeechRecognitionInstance | null = null;
   private isListening: boolean = false;
 
   constructor(
@@ -85,7 +115,7 @@ export class SpeechRecorder {
     private onEnd: () => void
   ) {
     if (typeof window !== 'undefined') {
-      const win = window as IWindowSpeech;
+      const win = window as unknown as IWindowSpeech;
       const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
       if (SpeechRec) {
         this.recognition = new SpeechRec();
@@ -93,12 +123,12 @@ export class SpeechRecorder {
         this.recognition.interimResults = false;
         this.recognition.lang = 'en-US';
 
-        this.recognition.onresult = (event: any) => {
+        this.recognition.onresult = (event: ISpeechRecognitionEvent) => {
           const transcript = event.results[0][0].transcript;
           this.onResult(transcript);
         };
 
-        this.recognition.onerror = (event: any) => {
+        this.recognition.onerror = (event: ISpeechRecognitionErrorEvent) => {
           this.isListening = false;
           this.onError(event.error || 'Speech recognition failed');
         };

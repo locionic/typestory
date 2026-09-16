@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { BookOpen, Mic, Volume2, Sparkles, ArrowRight, Zap, Target, Award, CheckCircle } from 'lucide-react';
+import { BookOpen, Mic, Sparkles, ArrowRight, Zap } from 'lucide-react';
 import TypingEngine from '../components/typing/TypingEngine';
 import { STORIES } from '../data/stories';
 import { VOCAB_BANKS } from '../data/vocab';

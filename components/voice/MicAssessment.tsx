@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Volume2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import { Mic, MicOff, Volume2, AlertCircle } from 'lucide-react';
 import {
   SpeechRecorder,
   isSpeechRecognitionSupported,
@@ -17,18 +17,27 @@ interface MicAssessmentProps {
 }
 
 export default function MicAssessment({ targetText, onEvaluated }: MicAssessmentProps) {
-  const [isSupported, setIsSupported] = useState<boolean>(true);
+  const isSupported = useSyncExternalStore(
+    () => () => {},
+    () => isSpeechRecognitionSupported(),
+    () => true
+  );
   const [isListening, setIsListening] = useState<boolean>(false);
   const [transcript, setTranscript] = useState<string>('');
   const [result, setResult] = useState<SpeechEvaluationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [prevTargetText, setPrevTargetText] = useState<string>(targetText);
+
+  // Reset state during render if targetText changes
+  if (targetText !== prevTargetText) {
+    setPrevTargetText(targetText);
+    setTranscript('');
+    setResult(null);
+    setErrorMessage(null);
+  }
 
   const recorderRef = useRef<SpeechRecorder | null>(null);
   const { setSpeechResult } = useTypingStore();
-
-  useEffect(() => {
-    setIsSupported(isSpeechRecognitionSupported());
-  }, []);
 
   const handleResult = useCallback(
     (spokenText: string) => {
@@ -56,14 +65,12 @@ export default function MicAssessment({ targetText, onEvaluated }: MicAssessment
   // Initialize recorder
   useEffect(() => {
     recorderRef.current = new SpeechRecorder(handleResult, handleError, handleEnd);
+    return () => {
+      if (recorderRef.current) {
+        recorderRef.current.stop();
+      }
+    };
   }, [handleResult, handleError, handleEnd]);
-
-  // Reset when targetText changes
-  useEffect(() => {
-    setTranscript('');
-    setResult(null);
-    setErrorMessage(null);
-  }, [targetText]);
 
   const toggleListening = () => {
     if (!recorderRef.current) return;

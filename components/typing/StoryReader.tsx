@@ -21,7 +21,7 @@ export default function StoryReader({ story }: StoryReaderProps) {
   // Load active paragraph into typing store
   useEffect(() => {
     loadCustomText(currentParagraph, `${story.title} (Part ${currentParagraphIndex + 1}/${paragraphs.length})`);
-  }, [currentParagraphIndex, currentParagraph, story.title, loadCustomText]);
+  }, [currentParagraphIndex, currentParagraph, story.title, loadCustomText, paragraphs.length]);
 
   const handleNext = () => {
     if (currentParagraphIndex < paragraphs.length - 1) {
@@ -95,7 +95,10 @@ export default function StoryReader({ story }: StoryReaderProps) {
       </div>
 
       {/* Active Typing & Voice Engine for this Paragraph */}
-      <TypingEngine />
+      <TypingEngine
+        onNext={currentParagraphIndex < paragraphs.length - 1 ? handleNext : undefined}
+        nextLabel="Next Paragraph"
+      />
 
       {/* Story Overview & Reading Panel */}
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">

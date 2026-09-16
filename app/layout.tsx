@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import './globals.css';
 import Navbar from '../components/Navbar';
 
@@ -70,9 +71,9 @@ export default function RootLayout({
               &copy; {new Date().getFullYear()} TypeStory. Free open-access English typing and speech trainer.
             </div>
             <div className="flex gap-4">
-              <a href="/stories" className="hover:text-indigo-600">Stories</a>
-              <a href="/vocab" className="hover:text-indigo-600">Word Banks</a>
-              <a href="/custom" className="hover:text-indigo-600">Paste Text</a>
+              <Link href="/stories" className="hover:text-indigo-600">Stories</Link>
+              <Link href="/vocab" className="hover:text-indigo-600">Word Banks</Link>
+              <Link href="/custom" className="hover:text-indigo-600">Paste Text</Link>
             </div>
           </div>
         </footer>
