@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { RotateCcw, Zap, Target, CheckCircle2, Volume2, Keyboard } from 'lucide-react';
 import { useTypingStore } from '../../store/useTypingStore';
-import MicAssessment from '../voice/MicAssessment';
+import LiveCaptionStream from '../voice/LiveCaptionStream';
 import VirtualKeyboard from './VirtualKeyboard';
 import { soundEngine } from '../../lib/audio';
 import { recordCompletedSession } from '../../lib/stats';
@@ -283,8 +283,8 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
         <VirtualKeyboard expectedChar={targetText[typedText.length]} />
       )}
 
-      {/* Microphone Voice Pronunciation Assessment */}
-      <MicAssessment key={targetText} targetText={targetText} />
+      {/* Chrome Live Captions & Spoken Word Evaluation Engine */}
+      <LiveCaptionStream key={targetText} targetText={targetText} />
     </div>
   );
 }

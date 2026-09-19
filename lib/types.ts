@@ -34,6 +34,29 @@ export interface SpeechEvaluationResult {
   feedback: 'perfect' | 'great' | 'needs-practice' | 'unclear';
 }
 
+export type WordPronunciationStatus = 'correct' | 'incorrect' | 'speaking' | 'pending';
+
+export interface SpokenWordStatus {
+  word: string;
+  normalized: string;
+  status: WordPronunciationStatus;
+  matchedSpokenWord?: string;
+}
+
+export interface LiveSpeechState {
+  isListening: boolean;
+  liveTranscript: string;
+  interimTranscript: string;
+  finalTranscript: string;
+  words: SpokenWordStatus[];
+  accuracyScore: number;
+  correctCount: number;
+  incorrectCount: number;
+  totalWordsCount: number;
+  isAllMatched: boolean;
+  errorMessage: string | null;
+}
+
 export type SwitchSound = 'blue' | 'brown' | 'bubble' | 'mute';
 
 export interface TypingSessionRecord {
