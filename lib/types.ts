@@ -43,10 +43,20 @@ export interface SpokenWordStatus {
   matchedSpokenWord?: string;
 }
 
+export type SpeechEngineStatus =
+  | 'idle'
+  | 'connecting'
+  | 'ready'
+  | 'hearing-sound'
+  | 'hearing-speech'
+  | 'transcribed'
+  | 'error';
+
 export interface LiveSpeechState {
   isListening: boolean;
   isMicActive: boolean;
   audioLevel: number; // 0 to 100 audio volume level
+  engineStatus: SpeechEngineStatus;
   liveTranscript: string;
   interimTranscript: string;
   finalTranscript: string;

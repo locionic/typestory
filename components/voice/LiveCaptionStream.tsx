@@ -14,6 +14,7 @@ import {
   Play,
   HelpCircle,
   RefreshCw,
+  Zap,
 } from 'lucide-react';
 import {
   ContinuousSpeechCaptioner,
@@ -42,6 +43,7 @@ export default function LiveCaptionStream({
     isListening: false,
     isMicActive: false,
     audioLevel: 0,
+    engineStatus: 'idle',
     liveTranscript: '',
     interimTranscript: '',
     finalTranscript: '',
@@ -61,10 +63,27 @@ export default function LiveCaptionStream({
     () => false
   );
   const [showMicTester, setShowMicTester] = useState(false);
+  const [exclusiveMic, setExclusiveMic] = useState(false);
+  const [hasDetectedSoundWithoutText, setHasDetectedSoundWithoutText] = useState(false);
   const [isTestingMic, setIsTestingMic] = useState(false);
   const [testAudioUrl, setTestAudioUrl] = useState<string | null>(null);
   const [testCountdown, setTestCountdown] = useState<number>(0);
   const [testStatus, setTestStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (speechState.isListening && speechState.audioLevel > 15 && !speechState.liveTranscript) {
+      timer = setTimeout(() => {
+        setHasDetectedSoundWithoutText(true);
+      }, 3500);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [speechState.isListening, speechState.audioLevel, speechState.liveTranscript]);
+
+  const showSoundWithoutTextWarning =
+    hasDetectedSoundWithoutText && speechState.isListening && !speechState.liveTranscript;
 
   const captionerRef = useRef<ContinuousSpeechCaptioner | null>(null);
   const onAccuracyChangeRef = useRef(onAccuracyChange);
@@ -250,6 +269,25 @@ export default function LiveCaptionStream({
             <span className="hidden sm:inline">Hear Native</span>
           </button>
 
+          {/* Exclusive Mic Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !exclusiveMic;
+              setExclusiveMic(next);
+              if (captionerRef.current) captionerRef.current.setExclusiveMicMode(next);
+            }}
+            title="If your mic volume bounces but words do not appear, toggle Exclusive Mic to prevent browser audio device conflicts"
+            className={`flex items-center gap-1 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+              exclusiveMic
+                ? 'border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300'
+            }`}
+          >
+            <Zap className={`h-3.5 w-3.5 ${exclusiveMic ? 'text-amber-600' : 'text-gray-400'}`} />
+            <span>{exclusiveMic ? 'Exclusive Mic: ON' : 'Exclusive Mic'}</span>
+          </button>
+
           {/* Hardware Mic Tester Toggle */}
           <button
             type="button"
@@ -275,7 +313,7 @@ export default function LiveCaptionStream({
       </div>
 
       {/* Real-time Hardware Mic Audio Level Meter */}
-      {speechState.isMicActive && (
+      {speechState.isMicActive && !exclusiveMic && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-200/60 bg-emerald-50/60 px-4 py-2.5 text-xs text-emerald-950 dark:border-emerald-950/60 dark:bg-emerald-950/20 dark:text-emerald-200 animate-fadeIn">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">
@@ -315,6 +353,28 @@ export default function LiveCaptionStream({
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Exclusive Mic Mode Active Notice */}
+      {speechState.isListening && exclusiveMic && (
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-amber-600 shrink-0" />
+            <span>
+              <strong>Exclusive Mic Mode Active:</strong> Shared volume meter paused to give Google Chrome direct, unhindered speech recognition access.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setExclusiveMic(false);
+              if (captionerRef.current) captionerRef.current.setExclusiveMicMode(false);
+            }}
+            className="text-[11px] font-bold underline hover:text-amber-700 shrink-0"
+          >
+            Show VU Meter
+          </button>
         </div>
       )}
 
@@ -412,9 +472,40 @@ export default function LiveCaptionStream({
         </div>
       )}
 
+      {/* Sound Detected Without Text Advisory Card */}
+      {showSoundWithoutTextWarning && (
+        <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
+          <div className="flex items-start gap-2.5">
+            <HelpCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+            <div>
+              <span className="font-bold">Sound heard from microphone, but Chrome has not transcribed text yet:</span>
+              <div className="mt-1 space-y-1 text-[11px] text-amber-900/90 dark:text-amber-300/90">
+                <div>
+                  1. <strong>Device Contention:</strong> Your system audio driver might not allow two simultaneous mic readers. Click{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExclusiveMic(true);
+                      if (captionerRef.current) captionerRef.current.setExclusiveMicMode(true);
+                    }}
+                    className="font-bold underline text-amber-950 dark:text-amber-100 hover:text-indigo-600"
+                  >
+                    Switch to Exclusive Mic Mode
+                  </button>{' '}
+                  to release the volume meter and give Google Chrome exclusive audio capture.
+                </div>
+                <div>
+                  2. <strong>Brave Browser:</strong> Brave blocks Google Cloud Speech API by default. Enable Google Services in <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">brave://settings/privacy</code>, or use Google Chrome / Microsoft Edge.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Google Chrome Live Streaming Caption Box */}
       <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-gray-900 p-4 text-white shadow-inner dark:border-gray-800">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
@@ -425,9 +516,24 @@ export default function LiveCaptionStream({
             />
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
               {speechState.isListening
-                ? 'Chrome Live Caption Stream (Active & Listening)'
+                ? 'Chrome Live Caption Stream'
                 : 'Chrome Live Caption Stream (Idle)'}
             </span>
+
+            {/* Live Engine Status Badge */}
+            {speechState.isListening && (
+              <span className="rounded-md bg-gray-800 px-2 py-0.5 text-[10px] font-semibold border border-gray-700">
+                {speechState.engineStatus === 'hearing-speech' ? (
+                  <span className="text-emerald-400 font-bold">🗣️ Hearing Speech! Transcribing...</span>
+                ) : speechState.engineStatus === 'hearing-sound' ? (
+                  <span className="text-amber-300">🔊 Sound Detected</span>
+                ) : speechState.engineStatus === 'transcribed' ? (
+                  <span className="text-emerald-400 font-bold">✨ Transcribed</span>
+                ) : (
+                  <span className="text-indigo-300">🟢 Engine Active</span>
+                )}
+              </span>
+            )}
           </div>
 
           {speechState.isListening && (

@@ -32,6 +32,12 @@ interface ISpeechRecognitionInstance {
   onerror: ((event: ISpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
   onstart: (() => void) | null;
+  onaudiostart?: (() => void) | null;
+  onsoundstart?: (() => void) | null;
+  onspeechstart?: (() => void) | null;
+  onspeechend?: (() => void) | null;
+  onsoundend?: (() => void) | null;
+  onaudioend?: (() => void) | null;
   start: () => void;
   stop: () => void;
   abort: () => void;
@@ -404,6 +410,8 @@ export class ContinuousSpeechCaptioner {
   private isMicActive: boolean = false;
   private currentAudioLevel: number = 0;
   private targetText: string = '';
+  private engineStatus: LiveSpeechState['engineStatus'] = 'idle';
+  private exclusiveMicMode: boolean = false;
 
   // Persisted across session restarts so speech is never wiped out
   private persistedFinal: string = '';
@@ -429,60 +437,107 @@ export class ContinuousSpeechCaptioner {
     const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
     if (!SpeechRec) return;
 
+    if (this.recognition) {
+      try {
+        this.recognition.abort();
+      } catch {
+        // Ignore abort error
+      }
+    }
+
     this.recognition = new SpeechRec();
-    this.recognition.continuous = true;
+    const isSafari = typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    this.recognition.continuous = !isSafari;
     this.recognition.interimResults = true;
     this.recognition.lang = 'en-US';
 
     this.recognition.onstart = () => {
       this.isListening = true;
       this.hasFatalError = false;
+      this.engineStatus = 'ready';
       this.emitState({
         isListening: true,
+        engineStatus: 'ready',
         errorMessage: null,
         errorType: null,
       });
     };
 
+    if ('onaudiostart' in this.recognition) {
+      this.recognition.onaudiostart = () => {
+        this.engineStatus = 'ready';
+        this.emitState({ engineStatus: 'ready' });
+      };
+    }
+
+    if ('onsoundstart' in this.recognition) {
+      this.recognition.onsoundstart = () => {
+        this.engineStatus = 'hearing-sound';
+        this.emitState({ engineStatus: 'hearing-sound' });
+      };
+    }
+
+    if ('onspeechstart' in this.recognition) {
+      this.recognition.onspeechstart = () => {
+        this.engineStatus = 'hearing-speech';
+        this.emitState({ engineStatus: 'hearing-speech' });
+      };
+    }
+
+    if ('onspeechend' in this.recognition) {
+      this.recognition.onspeechend = () => {
+        this.engineStatus = 'ready';
+        this.emitState({ engineStatus: 'ready' });
+      };
+    }
+
     this.recognition.onresult = (event: ISpeechRecognitionEvent) => {
-      let sFinal = '';
-      let sInterim = '';
+      try {
+        let sFinal = '';
+        let sInterim = '';
 
-      for (let i = 0; i < event.results.length; i++) {
-        const item = event.results[i];
-        if (item.isFinal) {
-          sFinal += item[0].transcript + ' ';
-        } else {
-          sInterim += item[0].transcript + ' ';
+        for (let i = 0; i < event.results.length; i++) {
+          const item = event.results[i];
+          const text = item?.[0]?.transcript || '';
+          if (item?.isFinal) {
+            sFinal += text + ' ';
+          } else {
+            sInterim += text + ' ';
+          }
         }
+
+        this.currentSessionFinal = sFinal.trim();
+        this.currentSessionInterim = sInterim.trim();
+
+        const totalFinal = (this.persistedFinal + ' ' + this.currentSessionFinal).trim();
+        const liveTranscript = (totalFinal + ' ' + this.currentSessionInterim).trim();
+
+        const alignment = alignSpokenWordsWithTarget(
+          this.targetText,
+          totalFinal,
+          this.currentSessionInterim
+        );
+
+        this.engineStatus = 'transcribed';
+
+        this.emitState({
+          isListening: true,
+          engineStatus: 'transcribed',
+          liveTranscript,
+          interimTranscript: this.currentSessionInterim,
+          finalTranscript: totalFinal,
+          words: alignment.words,
+          accuracyScore: alignment.accuracyScore,
+          correctCount: alignment.correctCount,
+          incorrectCount: alignment.incorrectCount,
+          totalWordsCount: alignment.totalWordsCount,
+          isAllMatched: alignment.isAllMatched,
+          errorMessage: null,
+          errorType: null,
+        });
+      } catch (err) {
+        console.error('Error handling speech recognition result:', err);
       }
-
-      this.currentSessionFinal = sFinal.trim();
-      this.currentSessionInterim = sInterim.trim();
-
-      const totalFinal = (this.persistedFinal + ' ' + this.currentSessionFinal).trim();
-      const liveTranscript = (totalFinal + ' ' + this.currentSessionInterim).trim();
-
-      const alignment = alignSpokenWordsWithTarget(
-        this.targetText,
-        totalFinal,
-        this.currentSessionInterim
-      );
-
-      this.emitState({
-        isListening: true,
-        liveTranscript,
-        interimTranscript: this.currentSessionInterim,
-        finalTranscript: totalFinal,
-        words: alignment.words,
-        accuracyScore: alignment.accuracyScore,
-        correctCount: alignment.correctCount,
-        incorrectCount: alignment.incorrectCount,
-        totalWordsCount: alignment.totalWordsCount,
-        isAllMatched: alignment.isAllMatched,
-        errorMessage: null,
-        errorType: null,
-      });
     };
 
     this.recognition.onerror = (event: ISpeechRecognitionErrorEvent) => {
@@ -502,6 +557,7 @@ export class ContinuousSpeechCaptioner {
       this.isListening = false;
       this.audioMonitor.stop();
       this.isMicActive = false;
+      this.engineStatus = 'error';
 
       let msg = `Speech recognition error: ${err}`;
       let type: LiveSpeechState['errorType'] = 'unknown';
@@ -513,7 +569,7 @@ export class ContinuousSpeechCaptioner {
         msg = 'Speech recognition network error: Google Speech servers could not be reached. If you are using Brave, enable Google Services in brave://settings/privacy, or use Google Chrome / Microsoft Edge.';
         type = 'network';
       } else if (err === 'audio-capture') {
-        msg = 'Microphone hardware capture failed. Ensure your microphone is connected and not muted.';
+        msg = 'Microphone hardware capture failed. Try clicking "Exclusive Mic Mode" below to free the microphone.';
         type = 'no-mic';
       } else if (err === 'service-not-allowed') {
         msg = 'Speech recognition service is not allowed by this browser or network configuration.';
@@ -523,6 +579,7 @@ export class ContinuousSpeechCaptioner {
       this.emitState({
         isListening: false,
         isMicActive: false,
+        engineStatus: 'error',
         audioLevel: 0,
         errorMessage: msg,
         errorType: type,
@@ -542,8 +599,10 @@ export class ContinuousSpeechCaptioner {
         this.scheduleRestart();
       } else {
         this.isListening = false;
+        this.engineStatus = 'idle';
         this.emitState({
           isListening: false,
+          engineStatus: 'idle',
         });
       }
     };
@@ -552,9 +611,10 @@ export class ContinuousSpeechCaptioner {
   private scheduleRestart() {
     if (this.restartTimeout) clearTimeout(this.restartTimeout);
     this.restartTimeout = setTimeout(() => {
-      if (this.isListening && this.recognition && !this.hasFatalError) {
+      if (this.isListening && !this.hasFatalError) {
         try {
-          this.recognition.start();
+          this.initRecognition();
+          this.recognition?.start();
         } catch {
           // Already active
         }
@@ -562,7 +622,29 @@ export class ContinuousSpeechCaptioner {
     }, 150);
   }
 
+  public setExclusiveMicMode(enabled: boolean) {
+    this.exclusiveMicMode = enabled;
+    if (enabled) {
+      this.audioMonitor.stop();
+      this.isMicActive = false;
+      this.currentAudioLevel = 0;
+      this.emitState({
+        isMicActive: false,
+        audioLevel: 0,
+      });
+      if (this.isListening) {
+        this.scheduleRestart();
+      }
+    } else if (this.isListening) {
+      this.audioMonitor.start().then(() => {
+        this.isMicActive = true;
+        this.emitState({ isMicActive: true });
+      }).catch(() => {});
+    }
+  }
+
   public setTargetText(text: string) {
+    if (this.targetText === text) return;
     this.targetText = text;
     this.persistedFinal = '';
     this.currentSessionFinal = '';
@@ -586,11 +668,13 @@ export class ContinuousSpeechCaptioner {
   public async start(targetText: string): Promise<void> {
     this.targetText = targetText;
     this.hasFatalError = false;
+    this.engineStatus = 'connecting';
 
     if (!isSpeechRecognitionSupported()) {
       this.emitState({
         isListening: false,
         isMicActive: false,
+        engineStatus: 'error',
         audioLevel: 0,
         errorMessage: 'Speech recognition is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Safari.',
         errorType: 'browser-unsupported',
@@ -598,41 +682,31 @@ export class ContinuousSpeechCaptioner {
       return;
     }
 
-    // 1. Request hardware microphone access first
-    try {
-      await this.audioMonitor.start();
-      this.isMicActive = true;
-    } catch (err: unknown) {
-      const errorName = err instanceof Error ? err.name : String(err);
-      let errorMsg = 'Could not access your microphone. Please check your browser permissions.';
-      let errorType: LiveSpeechState['errorType'] = 'permission';
-
-      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-        errorMsg = 'Microphone permission denied. Please click the lock or camera icon in your browser address bar to allow microphone access.';
-        errorType = 'permission';
-      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
-        errorMsg = 'No microphone found on your device. Please plug in or connect a microphone and try again.';
-        errorType = 'no-mic';
-      } else if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
-        errorMsg = 'Microphone is already in use by another application (Zoom, Discord, etc.).';
-        errorType = 'no-mic';
+    // 1. Start hardware monitor if not in exclusive mode
+    if (!this.exclusiveMicMode) {
+      try {
+        await this.audioMonitor.start();
+        this.isMicActive = true;
+      } catch (err: unknown) {
+        const errorName = err instanceof Error ? err.name : String(err);
+        if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+          this.emitState({
+            isListening: false,
+            isMicActive: false,
+            engineStatus: 'error',
+            audioLevel: 0,
+            errorMessage: 'Microphone permission denied. Please allow microphone access in your browser address bar.',
+            errorType: 'permission',
+          });
+          return;
+        }
+        // AudioContext failure should not block speech recognition
+        this.isMicActive = false;
       }
-
-      this.emitState({
-        isListening: false,
-        isMicActive: false,
-        audioLevel: 0,
-        errorMessage: errorMsg,
-        errorType,
-      });
-      return;
     }
 
-    // 2. Initialize recognition engine
-    if (!this.recognition) {
-      this.initRecognition();
-    }
-
+    // 2. Initialize fresh recognition engine
+    this.initRecognition();
     this.isListening = true;
 
     try {
@@ -649,7 +723,8 @@ export class ContinuousSpeechCaptioner {
 
     this.emitState({
       isListening: true,
-      isMicActive: true,
+      isMicActive: this.isMicActive,
+      engineStatus: 'connecting',
       words: alignment.words,
       accuracyScore: alignment.accuracyScore,
       correctCount: alignment.correctCount,
@@ -743,6 +818,7 @@ export class ContinuousSpeechCaptioner {
       isListening: this.isListening,
       isMicActive: this.isMicActive,
       audioLevel: this.currentAudioLevel,
+      engineStatus: this.engineStatus,
       liveTranscript,
       interimTranscript: this.currentSessionInterim,
       finalTranscript: totalFinal,
