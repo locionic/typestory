@@ -14,7 +14,6 @@ import {
   Play,
   HelpCircle,
   RefreshCw,
-  Zap,
 } from 'lucide-react';
 import {
   ContinuousSpeechCaptioner,
@@ -63,7 +62,6 @@ export default function LiveCaptionStream({
     () => false
   );
   const [showMicTester, setShowMicTester] = useState(false);
-  const [exclusiveMic, setExclusiveMic] = useState(false);
   const [hasDetectedSoundWithoutText, setHasDetectedSoundWithoutText] = useState(false);
   const [isTestingMic, setIsTestingMic] = useState(false);
   const [testAudioUrl, setTestAudioUrl] = useState<string | null>(null);
@@ -72,15 +70,19 @@ export default function LiveCaptionStream({
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
-    if (speechState.isListening && speechState.audioLevel > 15 && !speechState.liveTranscript) {
+    if (
+      speechState.isListening &&
+      (speechState.engineStatus === 'hearing-speech' || speechState.engineStatus === 'hearing-sound') &&
+      !speechState.liveTranscript
+    ) {
       timer = setTimeout(() => {
         setHasDetectedSoundWithoutText(true);
-      }, 3500);
+      }, 4500);
     }
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [speechState.isListening, speechState.audioLevel, speechState.liveTranscript]);
+  }, [speechState.isListening, speechState.engineStatus, speechState.liveTranscript]);
 
   const showSoundWithoutTextWarning =
     hasDetectedSoundWithoutText && speechState.isListening && !speechState.liveTranscript;
@@ -269,25 +271,6 @@ export default function LiveCaptionStream({
             <span className="hidden sm:inline">Hear Native</span>
           </button>
 
-          {/* Exclusive Mic Toggle */}
-          <button
-            type="button"
-            onClick={() => {
-              const next = !exclusiveMic;
-              setExclusiveMic(next);
-              if (captionerRef.current) captionerRef.current.setExclusiveMicMode(next);
-            }}
-            title="If your mic volume bounces but words do not appear, toggle Exclusive Mic to prevent browser audio device conflicts"
-            className={`flex items-center gap-1 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
-              exclusiveMic
-                ? 'border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200'
-                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300'
-            }`}
-          >
-            <Zap className={`h-3.5 w-3.5 ${exclusiveMic ? 'text-amber-600' : 'text-gray-400'}`} />
-            <span>{exclusiveMic ? 'Exclusive Mic: ON' : 'Exclusive Mic'}</span>
-          </button>
-
           {/* Hardware Mic Tester Toggle */}
           <button
             type="button"
@@ -312,15 +295,15 @@ export default function LiveCaptionStream({
         </div>
       </div>
 
-      {/* Real-time Hardware Mic Audio Level Meter */}
-      {speechState.isMicActive && !exclusiveMic && (
+      {/* Real-time Speech Volume & Acoustic Monitor */}
+      {speechState.isListening && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-200/60 bg-emerald-50/60 px-4 py-2.5 text-xs text-emerald-950 dark:border-emerald-950/60 dark:bg-emerald-950/20 dark:text-emerald-200 animate-fadeIn">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-              <span className="font-bold text-[11px]">Hardware Mic:</span>
+              <span className="font-bold text-[11px]">Speech Monitor:</span>
             </div>
-            {/* 8-segment VU meter */}
+            {/* 8-segment dynamic VU meter */}
             <div className="flex items-end gap-[3px] h-4 w-20">
               {[8, 20, 32, 45, 58, 70, 82, 92].map((threshold, idx) => (
                 <span
@@ -338,43 +321,29 @@ export default function LiveCaptionStream({
               ))}
             </div>
             <span className="font-mono text-[11px] font-bold">
-              {speechState.audioLevel}% Vol
+              {speechState.audioLevel}%
             </span>
           </div>
 
           <div className="flex items-center gap-2 text-[11px]">
-            {speechState.audioLevel > 12 ? (
-              <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-                🎙️ Sound detected! Transcribing your speech...
+            {speechState.engineStatus === 'hearing-speech' ? (
+              <span className="font-semibold text-emerald-700 dark:text-emerald-300 animate-pulse">
+                🎙️ Voice detected! Transcribing and calculating words...
+              </span>
+            ) : speechState.engineStatus === 'hearing-sound' ? (
+              <span className="font-semibold text-amber-700 dark:text-amber-300">
+                🔊 Sound detected! Say the words above into your mic...
+              </span>
+            ) : speechState.engineStatus === 'transcribed' ? (
+              <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                ✨ Spoken words evaluated live!
               </span>
             ) : (
               <span className="text-emerald-600/80 dark:text-emerald-400/80 italic">
-                Waiting for speech (say the text above into your microphone)...
+                Listening... Read the sentence above into your microphone.
               </span>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Exclusive Mic Mode Active Notice */}
-      {speechState.isListening && exclusiveMic && (
-        <div className="flex items-center justify-between gap-2 rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
-          <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-amber-600 shrink-0" />
-            <span>
-              <strong>Exclusive Mic Mode Active:</strong> Shared volume meter paused to give Google Chrome direct, unhindered speech recognition access.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setExclusiveMic(false);
-              if (captionerRef.current) captionerRef.current.setExclusiveMicMode(false);
-            }}
-            className="text-[11px] font-bold underline hover:text-amber-700 shrink-0"
-          >
-            Show VU Meter
-          </button>
         </div>
       )}
 
@@ -472,30 +441,39 @@ export default function LiveCaptionStream({
         </div>
       )}
 
+      {/* Brave Browser Google Speech Advisory Banner */}
+      {isBrave && (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+          <div>
+            <span className="font-bold">Notice for Brave Browser users: </span>
+            <span>
+              Brave disables Google Speech Recognition by default. If your spoken words do not appear, go to{' '}
+              <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">
+                brave://settings/privacy
+              </code>{' '}
+              and toggle on <strong>&quot;Use Google services for speech recognition&quot;</strong>, or use Google Chrome / Microsoft Edge.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Sound Detected Without Text Advisory Card */}
       {showSoundWithoutTextWarning && (
         <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
           <div className="flex items-start gap-2.5">
             <HelpCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
             <div>
-              <span className="font-bold">Sound heard from microphone, but Chrome has not transcribed text yet:</span>
+              <span className="font-bold">Sound heard from microphone, but words have not transcribed yet:</span>
               <div className="mt-1 space-y-1 text-[11px] text-amber-900/90 dark:text-amber-300/90">
                 <div>
-                  1. <strong>Device Contention:</strong> Your system audio driver might not allow two simultaneous mic readers. Click{' '}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExclusiveMic(true);
-                      if (captionerRef.current) captionerRef.current.setExclusiveMicMode(true);
-                    }}
-                    className="font-bold underline text-amber-950 dark:text-amber-100 hover:text-indigo-600"
-                  >
-                    Switch to Exclusive Mic Mode
-                  </button>{' '}
-                  to release the volume meter and give Google Chrome exclusive audio capture.
+                  1. <strong>Microphone Clarity:</strong> Speak clearly and at a normal conversational volume directly into your default microphone.
                 </div>
                 <div>
-                  2. <strong>Brave Browser:</strong> Brave blocks Google Cloud Speech API by default. Enable Google Services in <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">brave://settings/privacy</code>, or use Google Chrome / Microsoft Edge.
+                  2. <strong>Browser Privacy:</strong> If using Brave Browser, make sure Google Speech Services are enabled in <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">brave://settings/privacy</code>, or use Google Chrome.
+                </div>
+                <div>
+                  3. <strong>Permissions:</strong> Check the lock/tune icon in your browser URL bar to ensure microphone access is set to &quot;Allow&quot;.
                 </div>
               </div>
             </div>
@@ -559,9 +537,21 @@ export default function LiveCaptionStream({
             </>
           ) : (
             <span className="text-gray-400 italic text-xs">
-              {speechState.isListening
-                ? 'Microphone active! Read the sentence aloud into your microphone...'
-                : 'Click "Start Live Captions" above, then read the sentence into your microphone.'}
+              {speechState.isListening ? (
+                speechState.engineStatus === 'hearing-speech' ? (
+                  <span className="text-emerald-400 not-italic font-medium">
+                    🗣️ Hearing your voice... Speaking recognized! Words incoming...
+                  </span>
+                ) : speechState.engineStatus === 'hearing-sound' ? (
+                  <span className="text-amber-300 not-italic">
+                    🔊 Sound detected... Speak clearly into your microphone!
+                  </span>
+                ) : (
+                  'Microphone active! Read the sentence aloud into your microphone...'
+                )
+              ) : (
+                'Click "Start Live Captions" above, then read the sentence into your microphone.'
+              )}
             </span>
           )}
         </p>

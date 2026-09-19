@@ -28,6 +28,7 @@ interface ISpeechRecognitionInstance {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
+  maxAlternatives?: number;
   onresult: ((event: ISpeechRecognitionEvent) => void) | null;
   onerror: ((event: ISpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
@@ -411,7 +412,7 @@ export class ContinuousSpeechCaptioner {
   private currentAudioLevel: number = 0;
   private targetText: string = '';
   private engineStatus: LiveSpeechState['engineStatus'] = 'idle';
-  private exclusiveMicMode: boolean = false;
+  private exclusiveMicMode: boolean = true;
 
   // Persisted across session restarts so speech is never wiped out
   private persistedFinal: string = '';
@@ -431,25 +432,48 @@ export class ContinuousSpeechCaptioner {
     });
   }
 
+  private cleanupRecognition() {
+    if (this.restartTimeout) {
+      clearTimeout(this.restartTimeout);
+      this.restartTimeout = null;
+    }
+    if (this.recognition) {
+      const rec = this.recognition;
+      // CRITICAL: nullify all event handlers before aborting so no ghost onend/onerror callbacks trigger restart cascades!
+      rec.onstart = null;
+      rec.onaudiostart = null;
+      rec.onsoundstart = null;
+      rec.onspeechstart = null;
+      rec.onspeechend = null;
+      rec.onresult = null;
+      rec.onerror = null;
+      rec.onend = null;
+      try {
+        rec.abort();
+      } catch {
+        // Ignore abort error
+      }
+      this.recognition = null;
+    }
+  }
+
   private initRecognition() {
     if (typeof window === 'undefined') return;
     const win = window as unknown as IWindowSpeech;
     const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
     if (!SpeechRec) return;
 
-    if (this.recognition) {
-      try {
-        this.recognition.abort();
-      } catch {
-        // Ignore abort error
-      }
-    }
+    this.cleanupRecognition();
 
     this.recognition = new SpeechRec();
     const isSafari = typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     this.recognition.continuous = !isSafari;
     this.recognition.interimResults = true;
-    this.recognition.lang = 'en-US';
+
+    // Use user's local English dialect if available (en-US, en-GB, en-AU, etc.)
+    const userLang = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    this.recognition.lang = userLang && userLang.toLowerCase().startsWith('en') ? userLang : 'en-US';
+    this.recognition.maxAlternatives = 3;
 
     this.recognition.onstart = () => {
       this.isListening = true;
@@ -465,15 +489,19 @@ export class ContinuousSpeechCaptioner {
 
     if ('onaudiostart' in this.recognition) {
       this.recognition.onaudiostart = () => {
-        this.engineStatus = 'ready';
-        this.emitState({ engineStatus: 'ready' });
+        if (this.engineStatus === 'idle' || this.engineStatus === 'connecting') {
+          this.engineStatus = 'ready';
+          this.emitState({ engineStatus: 'ready' });
+        }
       };
     }
 
     if ('onsoundstart' in this.recognition) {
       this.recognition.onsoundstart = () => {
-        this.engineStatus = 'hearing-sound';
-        this.emitState({ engineStatus: 'hearing-sound' });
+        if (this.engineStatus !== 'hearing-speech' && this.engineStatus !== 'transcribed') {
+          this.engineStatus = 'hearing-sound';
+          this.emitState({ engineStatus: 'hearing-sound' });
+        }
       };
     }
 
@@ -486,8 +514,7 @@ export class ContinuousSpeechCaptioner {
 
     if ('onspeechend' in this.recognition) {
       this.recognition.onspeechend = () => {
-        this.engineStatus = 'ready';
-        this.emitState({ engineStatus: 'ready' });
+        // Keep hearing-speech or transcribed until onresult or onend
       };
     }
 
@@ -498,8 +525,9 @@ export class ContinuousSpeechCaptioner {
 
         for (let i = 0; i < event.results.length; i++) {
           const item = event.results[i];
-          const text = item?.[0]?.transcript || '';
-          if (item?.isFinal) {
+          if (!item || item.length === 0) continue;
+          const text = item[0]?.transcript || '';
+          if (item.isFinal) {
             sFinal += text + ' ';
           } else {
             sInterim += text + ' ';
@@ -553,34 +581,35 @@ export class ContinuousSpeechCaptioner {
         return;
       }
 
-      this.hasFatalError = true;
-      this.isListening = false;
-      this.audioMonitor.stop();
-      this.isMicActive = false;
-      this.engineStatus = 'error';
-
       let msg = `Speech recognition error: ${err}`;
       let type: LiveSpeechState['errorType'] = 'unknown';
 
       if (err === 'not-allowed') {
+        this.hasFatalError = true;
+        this.isListening = false;
         msg = 'Microphone permission blocked in browser settings. Please click the lock or camera icon in your address bar to allow microphone access.';
         type = 'permission';
       } else if (err === 'network') {
+        this.hasFatalError = true;
+        this.isListening = false;
         msg = 'Speech recognition network error: Google Speech servers could not be reached. If you are using Brave, enable Google Services in brave://settings/privacy, or use Google Chrome / Microsoft Edge.';
         type = 'network';
       } else if (err === 'audio-capture') {
-        msg = 'Microphone hardware capture failed. Try clicking "Exclusive Mic Mode" below to free the microphone.';
+        this.hasFatalError = true;
+        this.isListening = false;
+        msg = 'Microphone hardware capture failed. Ensure your microphone is plugged in, unmuted, and not used exclusively by another program.';
         type = 'no-mic';
       } else if (err === 'service-not-allowed') {
+        this.hasFatalError = true;
+        this.isListening = false;
         msg = 'Speech recognition service is not allowed by this browser or network configuration.';
         type = 'browser-unsupported';
       }
 
+      this.engineStatus = 'error';
       this.emitState({
-        isListening: false,
-        isMicActive: false,
+        isListening: !this.hasFatalError,
         engineStatus: 'error',
-        audioLevel: 0,
         errorMessage: msg,
         errorType: type,
       });
@@ -609,7 +638,12 @@ export class ContinuousSpeechCaptioner {
   }
 
   private scheduleRestart() {
-    if (this.restartTimeout) clearTimeout(this.restartTimeout);
+    if (this.restartTimeout) {
+      clearTimeout(this.restartTimeout);
+      this.restartTimeout = null;
+    }
+    if (!this.isListening || this.hasFatalError) return;
+
     this.restartTimeout = setTimeout(() => {
       if (this.isListening && !this.hasFatalError) {
         try {
@@ -619,28 +653,11 @@ export class ContinuousSpeechCaptioner {
           // Already active
         }
       }
-    }, 150);
+    }, 200);
   }
 
   public setExclusiveMicMode(enabled: boolean) {
     this.exclusiveMicMode = enabled;
-    if (enabled) {
-      this.audioMonitor.stop();
-      this.isMicActive = false;
-      this.currentAudioLevel = 0;
-      this.emitState({
-        isMicActive: false,
-        audioLevel: 0,
-      });
-      if (this.isListening) {
-        this.scheduleRestart();
-      }
-    } else if (this.isListening) {
-      this.audioMonitor.start().then(() => {
-        this.isMicActive = true;
-        this.emitState({ isMicActive: true });
-      }).catch(() => {});
-    }
   }
 
   public setTargetText(text: string) {
@@ -682,32 +699,13 @@ export class ContinuousSpeechCaptioner {
       return;
     }
 
-    // 1. Start hardware monitor if not in exclusive mode
-    if (!this.exclusiveMicMode) {
-      try {
-        await this.audioMonitor.start();
-        this.isMicActive = true;
-      } catch (err: unknown) {
-        const errorName = err instanceof Error ? err.name : String(err);
-        if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-          this.emitState({
-            isListening: false,
-            isMicActive: false,
-            engineStatus: 'error',
-            audioLevel: 0,
-            errorMessage: 'Microphone permission denied. Please allow microphone access in your browser address bar.',
-            errorType: 'permission',
-          });
-          return;
-        }
-        // AudioContext failure should not block speech recognition
-        this.isMicActive = false;
-      }
-    }
-
-    // 2. Initialize fresh recognition engine
-    this.initRecognition();
+    // Stop audio monitor so Chrome's Speech Recognition has 100% exclusive microphone access
+    this.audioMonitor.stop();
+    this.isMicActive = true;
     this.isListening = true;
+
+    // Initialize fresh recognition engine
+    this.initRecognition();
 
     try {
       this.recognition?.start();
@@ -723,7 +721,7 @@ export class ContinuousSpeechCaptioner {
 
     this.emitState({
       isListening: true,
-      isMicActive: this.isMicActive,
+      isMicActive: true,
       engineStatus: 'connecting',
       words: alignment.words,
       accuracyScore: alignment.accuracyScore,
@@ -739,20 +737,14 @@ export class ContinuousSpeechCaptioner {
   public stop() {
     this.isListening = false;
     this.hasFatalError = false;
+    this.engineStatus = 'idle';
 
     if (this.restartTimeout) {
       clearTimeout(this.restartTimeout);
       this.restartTimeout = null;
     }
 
-    if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch {
-        // Ignore stop error
-      }
-    }
-
+    this.cleanupRecognition();
     this.audioMonitor.stop();
     this.isMicActive = false;
     this.currentAudioLevel = 0;
@@ -770,6 +762,7 @@ export class ContinuousSpeechCaptioner {
     this.emitState({
       isListening: false,
       isMicActive: false,
+      engineStatus: 'idle',
       audioLevel: 0,
       liveTranscript: totalFinal,
       interimTranscript: '',
@@ -814,10 +807,25 @@ export class ContinuousSpeechCaptioner {
       this.currentSessionInterim
     );
 
+    let audioLevel = this.currentAudioLevel;
+    if (this.isListening) {
+      if (this.engineStatus === 'hearing-speech') {
+        audioLevel = Math.max(audioLevel, 78);
+      } else if (this.engineStatus === 'hearing-sound') {
+        audioLevel = Math.max(audioLevel, 45);
+      } else if (this.engineStatus === 'transcribed') {
+        audioLevel = Math.max(audioLevel, 85);
+      } else if (this.engineStatus === 'ready') {
+        audioLevel = Math.max(audioLevel, 12);
+      }
+    } else {
+      audioLevel = 0;
+    }
+
     this.onStateChange({
       isListening: this.isListening,
-      isMicActive: this.isMicActive,
-      audioLevel: this.currentAudioLevel,
+      isMicActive: this.isListening || this.isMicActive,
+      audioLevel,
       engineStatus: this.engineStatus,
       liveTranscript,
       interimTranscript: this.currentSessionInterim,
