@@ -45,6 +45,8 @@ export interface SpokenWordStatus {
 
 export interface LiveSpeechState {
   isListening: boolean;
+  isMicActive: boolean;
+  audioLevel: number; // 0 to 100 audio volume level
   liveTranscript: string;
   interimTranscript: string;
   finalTranscript: string;
@@ -55,6 +57,7 @@ export interface LiveSpeechState {
   totalWordsCount: number;
   isAllMatched: boolean;
   errorMessage: string | null;
+  errorType?: 'permission' | 'network' | 'no-mic' | 'browser-unsupported' | 'unknown' | null;
 }
 
 export type SwitchSound = 'blue' | 'brown' | 'bubble' | 'mute';
