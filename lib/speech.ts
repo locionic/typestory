@@ -62,6 +62,30 @@ export function isBraveBrowser(): boolean {
   return !!(navigator as unknown as { brave?: { isBrave?: () => Promise<boolean> } }).brave;
 }
 
+export function isUnbrandedChromium(): boolean {
+  if (typeof window === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/\bChromium\b/i.test(ua)) return true;
+
+  const nav = navigator as unknown as {
+    userAgentData?: {
+      brands?: Array<{ brand: string; version: string }>;
+    };
+  };
+  if (nav.userAgentData?.brands && Array.isArray(nav.userAgentData.brands)) {
+    const brandNames = nav.userAgentData.brands.map((b) => b.brand);
+    const hasChromium = brandNames.some((b) => /Chromium/i.test(b));
+    const hasGoogleChrome = brandNames.some((b) => /Google Chrome/i.test(b));
+    const hasEdge = brandNames.some((b) => /Edge|Microsoft/i.test(b));
+    const hasOpera = brandNames.some((b) => /Opera/i.test(b));
+    const hasBrave = brandNames.some((b) => /Brave/i.test(b));
+    if (hasChromium && !hasGoogleChrome && !hasEdge && !hasOpera && !hasBrave) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Clean text for speech matching (lowercase, strip punctuation and smart quotes)
 export function normalizeForSpeech(text: string): string {
   return text
@@ -472,10 +496,8 @@ export class ContinuousSpeechCaptioner {
     this.cleanupRecognition();
 
     this.recognition = new SpeechRec();
-    // Continuous = false is the industry standard for Chromium Speech API:
-    // It forces the cloud recognizer to flush and finalize tokens without stalling,
-    // and seamless auto-restart in onend provides continuous speech flow without delay.
-    this.recognition.continuous = false;
+    const isSafari = typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    this.recognition.continuous = !isSafari;
     this.recognition.interimResults = true;
     this.recognition.maxAlternatives = 3;
 
@@ -484,7 +506,7 @@ export class ContinuousSpeechCaptioner {
     const lang = userLang && userLang.toLowerCase().startsWith('en') ? userLang : 'en-US';
     this.recognition.lang = lang;
 
-    this.addLog(`engine:init (lang=${lang}, continuous=false)`);
+    this.addLog(`engine:init (lang=${lang}, continuous=${!isSafari})`);
 
     this.recognition.onstart = () => {
       this.isListening = true;
@@ -529,12 +551,7 @@ export class ContinuousSpeechCaptioner {
 
     if ('onspeechend' in this.recognition) {
       this.recognition.onspeechend = () => {
-        this.addLog('speech:ended -> stop() to flush');
-        try {
-          this.recognition?.stop();
-        } catch {
-          // Ignore
-        }
+        this.addLog('speech:paused');
       };
     }
 

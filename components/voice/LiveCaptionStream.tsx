@@ -19,6 +19,7 @@ import {
   ContinuousSpeechCaptioner,
   isSpeechRecognitionSupported,
   isBraveBrowser,
+  isUnbrandedChromium,
 } from '../../lib/speech';
 import { soundEngine } from '../../lib/audio';
 import { LiveSpeechState, SpokenWordStatus } from '../../lib/types';
@@ -59,6 +60,11 @@ export default function LiveCaptionStream({
   const isBrave = useSyncExternalStore(
     () => () => {},
     () => isBraveBrowser(),
+    () => false
+  );
+  const isChromium = useSyncExternalStore(
+    () => () => {},
+    () => isUnbrandedChromium(),
     () => false
   );
   const [showMicTester, setShowMicTester] = useState(false);
@@ -432,7 +438,7 @@ export default function LiveCaptionStream({
             <div>Status: <strong className="text-white">{speechState.engineStatus}</strong></div>
             <div>Listening: <strong className="text-white">{String(speechState.isListening)}</strong></div>
             <div>Audio Level: <strong className="text-white">{speechState.audioLevel}%</strong></div>
-            <div>Mode: <strong className="text-emerald-400">Auto-Flush (Single-Shot)</strong></div>
+            <div>Mode: <strong className="text-emerald-400">Continuous Live Stream</strong></div>
           </div>
           <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
             Recent Recognition Events:
@@ -447,6 +453,22 @@ export default function LiveCaptionStream({
             ) : (
               <div className="text-gray-500 italic">No events logged yet. Click &quot;Start Live Captions&quot; and speak to see live events.</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Linux / Debian Unbranded Chromium Advisory Banner */}
+      {isChromium && (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
+          <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-bold text-sm">Open-Source Chromium Detected (No Google Speech Keys)</span>
+            <p className="text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+              Standard Debian/Ubuntu Chromium packages do not bundle Google&apos;s proprietary Speech API keys, meaning speech recognition cannot reach Google Cloud servers.
+            </p>
+            <p className="font-semibold text-amber-950 dark:text-amber-100">
+              💡 Please launch official <strong>Google Chrome</strong> (run <code>google-chrome https://typestory.locionic.com/</code>) or <strong>Microsoft Edge</strong>, where speech recognition is enabled and fully working.
+            </p>
           </div>
         </div>
       )}
@@ -493,23 +515,6 @@ export default function LiveCaptionStream({
         </div>
       )}
 
-      {/* Brave Browser Google Speech Advisory Banner */}
-      {isBrave && (
-        <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
-          <div>
-            <span className="font-bold">Notice for Brave Browser users: </span>
-            <span>
-              Brave disables Google Speech Recognition by default. If your spoken words do not appear, go to{' '}
-              <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">
-                brave://settings/privacy
-              </code>{' '}
-              and toggle on <strong>&quot;Use Google services for speech recognition&quot;</strong>, or use Google Chrome / Microsoft Edge.
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Sound Detected Without Text Advisory Card */}
       {showSoundWithoutTextWarning && (
         <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
@@ -517,15 +522,18 @@ export default function LiveCaptionStream({
             <HelpCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
             <div>
               <span className="font-bold">Sound heard from microphone, but words have not transcribed yet:</span>
-              <div className="mt-1 space-y-1 text-[11px] text-amber-900/90 dark:text-amber-300/90">
+              <div className="mt-1.5 space-y-1.5 text-[11px] text-amber-900/90 dark:text-amber-300/90">
                 <div>
-                  1. <strong>Microphone Clarity:</strong> Speak clearly and at a normal conversational volume directly into your default microphone.
+                  1. <strong>Linux / Debian Chromium:</strong> Open-source Chromium packages do not have Google Cloud Speech API keys. Please launch official <strong>Google Chrome</strong> (<code>google-chrome</code> command) or Microsoft Edge.
                 </div>
                 <div>
-                  2. <strong>Browser Privacy:</strong> If using Brave Browser, make sure Google Speech Services are enabled in <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">brave://settings/privacy</code>, or use Google Chrome.
+                  2. <strong>Brave Browser:</strong> If using Brave Browser, make sure Google Speech Services are enabled in <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">brave://settings/privacy</code>, or use Google Chrome.
                 </div>
                 <div>
-                  3. <strong>Permissions:</strong> Check the lock/tune icon in your browser URL bar to ensure microphone access is set to &quot;Allow&quot;.
+                  3. <strong>Microphone Clarity:</strong> Speak clearly and at a normal conversational volume directly into your default microphone.
+                </div>
+                <div>
+                  4. <strong>Permissions:</strong> Check the lock/tune icon in your browser URL bar to ensure microphone access is set to &quot;Allow&quot;.
                 </div>
               </div>
             </div>
