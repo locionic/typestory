@@ -68,6 +68,7 @@ export interface LiveSpeechState {
   isAllMatched: boolean;
   errorMessage: string | null;
   errorType?: 'permission' | 'network' | 'no-mic' | 'browser-unsupported' | 'unknown' | null;
+  diagnosticLog?: string[];
 }
 
 export type SwitchSound = 'blue' | 'brown' | 'bubble' | 'mute';

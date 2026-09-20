@@ -413,6 +413,7 @@ export class ContinuousSpeechCaptioner {
   private targetText: string = '';
   private engineStatus: LiveSpeechState['engineStatus'] = 'idle';
   private exclusiveMicMode: boolean = true;
+  private logs: string[] = [];
 
   // Persisted across session restarts so speech is never wiped out
   private persistedFinal: string = '';
@@ -430,6 +431,11 @@ export class ContinuousSpeechCaptioner {
         audioLevel: level,
       });
     });
+  }
+
+  private addLog(entry: string) {
+    const time = new Date().toTimeString().split(' ')[0];
+    this.logs = [`[${time}] ${entry}`, ...this.logs.slice(0, 9)];
   }
 
   private cleanupRecognition() {
@@ -466,19 +472,25 @@ export class ContinuousSpeechCaptioner {
     this.cleanupRecognition();
 
     this.recognition = new SpeechRec();
-    const isSafari = typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    this.recognition.continuous = !isSafari;
+    // Continuous = false is the industry standard for Chromium Speech API:
+    // It forces the cloud recognizer to flush and finalize tokens without stalling,
+    // and seamless auto-restart in onend provides continuous speech flow without delay.
+    this.recognition.continuous = false;
     this.recognition.interimResults = true;
+    this.recognition.maxAlternatives = 3;
 
     // Use user's local English dialect if available (en-US, en-GB, en-AU, etc.)
     const userLang = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
-    this.recognition.lang = userLang && userLang.toLowerCase().startsWith('en') ? userLang : 'en-US';
-    this.recognition.maxAlternatives = 3;
+    const lang = userLang && userLang.toLowerCase().startsWith('en') ? userLang : 'en-US';
+    this.recognition.lang = lang;
+
+    this.addLog(`engine:init (lang=${lang}, continuous=false)`);
 
     this.recognition.onstart = () => {
       this.isListening = true;
       this.hasFatalError = false;
       this.engineStatus = 'ready';
+      this.addLog('engine:started');
       this.emitState({
         isListening: true,
         engineStatus: 'ready',
@@ -489,6 +501,7 @@ export class ContinuousSpeechCaptioner {
 
     if ('onaudiostart' in this.recognition) {
       this.recognition.onaudiostart = () => {
+        this.addLog('audio:started');
         if (this.engineStatus === 'idle' || this.engineStatus === 'connecting') {
           this.engineStatus = 'ready';
           this.emitState({ engineStatus: 'ready' });
@@ -498,6 +511,7 @@ export class ContinuousSpeechCaptioner {
 
     if ('onsoundstart' in this.recognition) {
       this.recognition.onsoundstart = () => {
+        this.addLog('sound:detected');
         if (this.engineStatus !== 'hearing-speech' && this.engineStatus !== 'transcribed') {
           this.engineStatus = 'hearing-sound';
           this.emitState({ engineStatus: 'hearing-sound' });
@@ -507,6 +521,7 @@ export class ContinuousSpeechCaptioner {
 
     if ('onspeechstart' in this.recognition) {
       this.recognition.onspeechstart = () => {
+        this.addLog('speech:detected');
         this.engineStatus = 'hearing-speech';
         this.emitState({ engineStatus: 'hearing-speech' });
       };
@@ -514,7 +529,12 @@ export class ContinuousSpeechCaptioner {
 
     if ('onspeechend' in this.recognition) {
       this.recognition.onspeechend = () => {
-        // Keep hearing-speech or transcribed until onresult or onend
+        this.addLog('speech:ended -> stop() to flush');
+        try {
+          this.recognition?.stop();
+        } catch {
+          // Ignore
+        }
       };
     }
 
@@ -533,6 +553,9 @@ export class ContinuousSpeechCaptioner {
             sInterim += text + ' ';
           }
         }
+
+        const preview = (sFinal || sInterim).trim();
+        this.addLog(`result: "${preview}" (${sFinal ? 'final' : 'interim'})`);
 
         this.currentSessionFinal = sFinal.trim();
         this.currentSessionInterim = sInterim.trim();
@@ -570,13 +593,14 @@ export class ContinuousSpeechCaptioner {
 
     this.recognition.onerror = (event: ISpeechRecognitionErrorEvent) => {
       const err = event.error;
+      this.addLog(`error: ${err}`);
 
-      // Benign silence in Chrome; ignore and continue listening
+      // Benign silence in Chrome; ignore and let onend restart smoothly
       if (err === 'no-speech') {
         return;
       }
 
-      // Aborted when stopping or cycling
+      // Aborted when stopping or cycling; ignore
       if (err === 'aborted') {
         return;
       }
@@ -616,6 +640,7 @@ export class ContinuousSpeechCaptioner {
     };
 
     this.recognition.onend = () => {
+      this.addLog('engine:ended');
       // Save any finalized words from this session into persisted accumulator
       if (this.currentSessionFinal.trim()) {
         this.persistedFinal = (this.persistedFinal + ' ' + this.currentSessionFinal).trim();
@@ -653,7 +678,7 @@ export class ContinuousSpeechCaptioner {
           // Already active
         }
       }
-    }, 200);
+    }, 60);
   }
 
   public setExclusiveMicMode(enabled: boolean) {
@@ -838,6 +863,7 @@ export class ContinuousSpeechCaptioner {
       isAllMatched: alignment.isAllMatched,
       errorMessage: null,
       errorType: null,
+      diagnosticLog: [...this.logs],
       ...partial,
     });
   }

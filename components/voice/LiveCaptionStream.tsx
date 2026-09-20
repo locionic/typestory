@@ -62,6 +62,7 @@ export default function LiveCaptionStream({
     () => false
   );
   const [showMicTester, setShowMicTester] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [hasDetectedSoundWithoutText, setHasDetectedSoundWithoutText] = useState(false);
   const [isTestingMic, setIsTestingMic] = useState(false);
   const [testAudioUrl, setTestAudioUrl] = useState<string | null>(null);
@@ -282,6 +283,21 @@ export default function LiveCaptionStream({
             <span className="hidden sm:inline">Test Mic</span>
           </button>
 
+          {/* Engine Diagnostics Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowDiagnostics((prev) => !prev)}
+            title="View live speech recognition events and status"
+            className={`flex items-center gap-1 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+              showDiagnostics
+                ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
+                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300'
+            }`}
+          >
+            <Activity className="h-3.5 w-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">Diagnostics</span>
+          </button>
+
           {speechState.liveTranscript && (
             <button
               type="button"
@@ -396,6 +412,42 @@ export default function LiveCaptionStream({
               {testStatus}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Speech Engine Live Event Diagnostics Drawer */}
+      {showDiagnostics && (
+        <div className="rounded-2xl border border-indigo-200 bg-slate-900 p-4 text-xs font-mono text-gray-200 shadow-sm dark:border-indigo-900 animate-fadeIn">
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-800">
+            <span className="font-bold text-indigo-400">Live Speech Engine Diagnostics</span>
+            <button
+              type="button"
+              onClick={() => setShowDiagnostics(false)}
+              className="text-gray-400 hover:text-white px-2 py-0.5 rounded text-xs hover:bg-gray-800"
+            >
+              ✕ Close
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-[11px] text-gray-300 bg-black/40 p-2.5 rounded-xl">
+            <div>Status: <strong className="text-white">{speechState.engineStatus}</strong></div>
+            <div>Listening: <strong className="text-white">{String(speechState.isListening)}</strong></div>
+            <div>Audio Level: <strong className="text-white">{speechState.audioLevel}%</strong></div>
+            <div>Mode: <strong className="text-emerald-400">Auto-Flush (Single-Shot)</strong></div>
+          </div>
+          <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+            Recent Recognition Events:
+          </div>
+          <div className="rounded-xl bg-black/60 p-2.5 text-[11px] space-y-1 max-h-40 overflow-y-auto border border-gray-800 font-mono">
+            {speechState.diagnosticLog && speechState.diagnosticLog.length > 0 ? (
+              speechState.diagnosticLog.map((log, idx) => (
+                <div key={idx} className={log.includes('error') ? 'text-rose-400' : log.includes('result') ? 'text-emerald-300 font-bold' : log.includes('speech') ? 'text-amber-300' : 'text-gray-400'}>
+                  {log}
+                </div>
+              ))
+            ) : (
+              <div className="text-gray-500 italic">No events logged yet. Click &quot;Start Live Captions&quot; and speak to see live events.</div>
+            )}
+          </div>
         </div>
       )}
 
