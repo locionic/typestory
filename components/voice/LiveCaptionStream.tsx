@@ -486,16 +486,18 @@ export default function LiveCaptionStream({
       )}
 
       {/* Brave Browser Diagnostic Notification */}
-      {isBrave && !braveNoticeDismissed && !speechState.liveTranscript && (
-        <div className="flex items-start justify-between gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200 animate-fadeIn">
+      {isBrave && !braveNoticeDismissed && (
+        <div className="flex items-start justify-between gap-2.5 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200 animate-fadeIn">
           <div className="flex items-start gap-2.5">
-            <HelpCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
-            <div>
-              <span className="font-bold">Brave Browser Notice (Informational):</span> Brave disables Google Cloud speech services by default.
-              If live speech does not transcribe when speaking, open <code className="rounded bg-amber-200/60 px-1 py-0.5 font-mono text-[10px] dark:bg-amber-900/60">brave://settings/privacy</code>, toggle ON &quot;Use Google services for push messaging and speech recognition&quot;, and <strong>restart Brave</strong>.
-              <div className="mt-1 text-[11px] text-amber-800/90 dark:text-amber-300/90">
-                Already turned it on? Make sure to completely close and restart Brave once, click &quot;Start Live Captions&quot; above, and speak!
-              </div>
+            <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-sm">Brave Browser Detected (Web Speech API Blocked)</span>
+              <p className="text-amber-900/90 dark:text-amber-300/90 leading-relaxed">
+                Brave does not have access to Google&apos;s proprietary Speech Recognition cloud servers. When you click &quot;Start Live Captions&quot;, Brave attempts to connect, fails with a <code>network</code> error after ~1 second, and automatically turns off the mic.
+              </p>
+              <p className="font-semibold text-amber-950 dark:text-amber-100">
+                💡 To use speech recognition, please open TypeStory in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>.
+              </p>
             </div>
           </div>
           <button

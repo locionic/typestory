@@ -633,7 +633,13 @@ export class ContinuousSpeechCaptioner {
       } else if (err === 'network') {
         this.hasFatalError = true;
         this.isListening = false;
-        msg = 'Speech recognition network error: Google Speech servers could not be reached. If you are using Brave, enable Google Services in brave://settings/privacy, or use Google Chrome / Microsoft Edge.';
+        if (isBraveBrowser()) {
+          msg = 'Brave Browser does not support Google Speech Recognition servers (network blocked). Please open TypeStory in Google Chrome or Microsoft Edge.';
+        } else if (isUnbrandedChromium()) {
+          msg = 'Open-source Chromium lacks Google Speech keys. Please open TypeStory in Google Chrome or Microsoft Edge.';
+        } else {
+          msg = 'Speech recognition network error: Google speech servers could not be reached. Please check your internet connection or use Google Chrome / Microsoft Edge.';
+        }
         type = 'network';
       } else if (err === 'audio-capture') {
         this.hasFatalError = true;
