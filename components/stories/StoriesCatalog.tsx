@@ -204,11 +204,13 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
                     <Clock className="h-3.5 w-3.5" />
                     <span>~{story.readingTimeMinutes} min</span>
                   </span>
-                  <span>{story.wordCount} words</span>
+                  <span>
+                    {story.category === 'tech' ? `${story.paragraphs.length} Q&A Questions` : `${story.wordCount} words`}
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between font-semibold text-xs text-indigo-600 dark:text-indigo-400">
-                  <span>Start Typing Session</span>
+                  <span>{story.category === 'tech' ? 'Practice Q&A Session' : 'Start Typing Session'}</span>
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </div>
               </div>

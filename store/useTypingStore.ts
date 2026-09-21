@@ -36,10 +36,10 @@ interface TypingState {
 }
 
 export const useTypingStore = create<TypingState>((set, get) => ({
-  title: 'Full-Stack Architecture & Cloud Systems',
+  title: 'Full-Stack Architecture: Interview Q&A',
   sourceType: 'story',
   targetText:
-    'Building modern web applications requires mastering React and Next.js frontends, type-safe backends, and cloud infrastructure. Hands-on knowledge of RAG pipelines, containerization, and automated CI/CD pipelines ensures reliable production software.',
+    'Q: What are the core pillars of modern full-stack web architecture? A: Modern full-stack architecture combines reactive React frontends, type-safe backends, automated CI/CD pipelines, and scalable cloud infrastructure.',
   typedText: '',
   activeStory: null,
   activeVocabList: null,

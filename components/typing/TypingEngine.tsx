@@ -50,6 +50,10 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
       ? Math.min(100, Math.round((typedText.length / targetText.length) * 100))
       : 0;
 
+  // Check if current passage is a Question & Answer drill
+  const isQA = targetText.startsWith('Q:') && targetText.includes(' A:');
+  const questionPrompt = isQA ? targetText.split(' A:')[0].replace(/^Q:\s*/, '') : '';
+
   // Live timer tick
   useEffect(() => {
     if (!startTime || isCompleted) return;
@@ -213,9 +217,33 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
 
       {/* Main Interactive Typing Board */}
       <div className="relative min-h-[220px] rounded-3xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:p-8">
-        <div className="mb-3 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-          {title}
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+            {title}
+          </div>
+          {isQA && (
+            <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wider uppercase text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+              Technical Q&amp;A
+            </span>
+          )}
         </div>
+
+        {/* Highlighted Interview Question Card */}
+        {isQA && (
+          <div className="mb-5 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4 dark:border-indigo-900/40 dark:bg-indigo-950/30">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="inline-flex items-center rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
+                Interview Question
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Type question &amp; model answer below
+              </span>
+            </div>
+            <p className="text-sm sm:text-base font-bold text-gray-900 dark:text-gray-100 leading-snug">
+              {questionPrompt}
+            </p>
+          </div>
+        )}
 
         {/* Character By Character Rendering */}
         <div className="font-mono text-xl sm:text-2xl leading-relaxed tracking-wide select-none">

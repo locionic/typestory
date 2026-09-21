@@ -67,10 +67,10 @@ export default function StoryReader({ story }: StoryReaderProps) {
         </button>
       </div>
 
-      {/* Paragraph Progress Tracker */}
+      {/* Paragraph / Question Progress Tracker */}
       <div className="flex items-center justify-between rounded-xl bg-gray-50 p-3 text-xs dark:bg-gray-900">
         <div className="font-semibold text-gray-700 dark:text-gray-300">
-          Paragraph {currentParagraphIndex + 1} of {paragraphs.length}
+          {story.category === 'tech' ? 'Question' : 'Paragraph'} {currentParagraphIndex + 1} of {paragraphs.length}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -97,29 +97,53 @@ export default function StoryReader({ story }: StoryReaderProps) {
       {/* Active Typing Engine for this Paragraph */}
       <TypingEngine
         onNext={currentParagraphIndex < paragraphs.length - 1 ? handleNext : undefined}
-        nextLabel="Next Paragraph"
+        nextLabel={story.category === 'tech' ? 'Next Question' : 'Next Paragraph'}
       />
 
       {/* Story Overview & Reading Panel */}
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
         <div className="flex items-center gap-2 mb-4 text-xs font-bold uppercase tracking-wider text-gray-400">
           <BookOpen className="h-4 w-4 text-indigo-500" />
-          <span>Full Story Reading Context</span>
+          <span>{story.category === 'tech' ? 'Technical Interview Questions & Model Answers' : 'Full Story Reading Context'}</span>
         </div>
         <div className="space-y-4 text-base leading-relaxed text-gray-600 dark:text-gray-300">
-          {paragraphs.map((p, idx) => (
-            <p
-              key={idx}
-              onClick={() => setCurrentParagraphIndex(idx)}
-              className={`cursor-pointer rounded-xl p-3 transition-all ${
-                idx === currentParagraphIndex
-                  ? 'bg-indigo-50/80 font-medium text-gray-900 shadow-sm ring-1 ring-indigo-300 dark:bg-indigo-950/30 dark:text-white dark:ring-indigo-700'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/40 opacity-75'
-              }`}
-            >
-              {p}
-            </p>
-          ))}
+          {paragraphs.map((p, idx) => {
+            const isQA = p.startsWith('Q:') && p.includes(' A:');
+            const [qPart, aPart] = isQA ? p.split(' A:') : [p, ''];
+
+            return (
+              <div
+                key={idx}
+                onClick={() => setCurrentParagraphIndex(idx)}
+                className={`cursor-pointer rounded-2xl p-4 transition-all ${
+                  idx === currentParagraphIndex
+                    ? 'bg-indigo-50/90 font-medium text-gray-900 shadow-sm ring-2 ring-indigo-400 dark:bg-indigo-950/40 dark:text-white dark:ring-indigo-600'
+                    : 'hover:bg-gray-50 dark:hover:bg-gray-800/40 opacity-75'
+                }`}
+              >
+                {isQA ? (
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <span className="shrink-0 rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-black text-white uppercase">
+                        Q{idx + 1}
+                      </span>
+                      <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">
+                        {qPart.replace(/^Q:\s*/, '')}
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2 text-xs sm:text-sm leading-relaxed text-gray-700 dark:text-gray-300 pl-2 sm:pl-4">
+                      <span className="shrink-0 font-extrabold text-emerald-600 dark:text-emerald-400">
+                        Answer:
+                      </span>
+                      <span>{aPart}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p>{p}</p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

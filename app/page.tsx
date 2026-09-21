@@ -12,13 +12,13 @@ export default function HomePage() {
       <div className="mb-10 text-center">
         <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1 text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 mb-4">
           <Sparkles className="h-3.5 w-3.5" />
-          <span>Touch Typing Practice • Full-Stack Engineering • Developer Stories</span>
+          <span>Touch Typing Practice • Technical Interview Q&amp;A • Classic Stories</span>
         </div>
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-gray-900 dark:text-white leading-[1.15]">
-          Master Touch Typing with Real Stories &amp; Technical Sentences
+          Master Touch Typing with Technical Interview Q&amp;A &amp; Real Stories
         </h1>
         <p className="mx-auto mt-4 max-w-2xl text-base sm:text-lg text-gray-600 dark:text-gray-300 leading-relaxed">
-          Build genuine speed and muscle memory. Practice typing full-stack architecture concepts, RAG system pipelines, cloud infrastructure workflows, and classic literature.
+          Build genuine speed and muscle memory. Practice typing full-stack engineering interview questions and model answers, RAG pipeline architectures, cloud infrastructure workflows, and classic literature.
         </p>
       </div>
 
@@ -170,10 +170,10 @@ export default function HomePage() {
         <div className="space-y-4">
           <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
             <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              What kind of technical sentences are included?
+              What kind of technical interview questions and answers are included?
             </h3>
             <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              We provide real-world software engineering practice modules covering Full-Stack architecture, Next.js 15 App Router, RAG pipelines, dense vector retrieval, Azure cloud PaaS, Docker containerization, and CI/CD automation workflows.
+              We provide real-world software engineering interview Q&amp;A modules covering Full-Stack architecture, Next.js 15 App Router, RAG pipelines, dense vector retrieval, Azure cloud PaaS, Docker networking, and CI/CD automation workflows.
             </p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
