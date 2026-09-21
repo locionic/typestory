@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!story) return { title: 'Story Not Found | TypeStory' };
 
   const title = `${story.title} by ${story.author}: English Type-Along Practice`;
-  const description = `${story.summary} Practice touch typing with this CEFR Level ${story.level} story. Real-time WPM, audio narration, and microphone speech assessment.`;
+  const description = `${story.summary} Practice touch typing with this CEFR Level ${story.level} story. Real-time WPM, accuracy tracking, and tactile keyboard feedback.`;
 
   return {
     title,

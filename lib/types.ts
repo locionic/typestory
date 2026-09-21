@@ -25,52 +25,6 @@ export interface StoryItem {
   keyVocabulary: VocabItem[];
 }
 
-export interface SpeechEvaluationResult {
-  spokenText: string;
-  targetText: string;
-  accuracyScore: number; // 0 to 100
-  matchedWords: string[];
-  missedWords: string[];
-  feedback: 'perfect' | 'great' | 'needs-practice' | 'unclear';
-}
-
-export type WordPronunciationStatus = 'correct' | 'incorrect' | 'speaking' | 'pending';
-
-export interface SpokenWordStatus {
-  word: string;
-  normalized: string;
-  status: WordPronunciationStatus;
-  matchedSpokenWord?: string;
-}
-
-export type SpeechEngineStatus =
-  | 'idle'
-  | 'connecting'
-  | 'ready'
-  | 'hearing-sound'
-  | 'hearing-speech'
-  | 'transcribed'
-  | 'error';
-
-export interface LiveSpeechState {
-  isListening: boolean;
-  isMicActive: boolean;
-  audioLevel: number; // 0 to 100 audio volume level
-  engineStatus: SpeechEngineStatus;
-  liveTranscript: string;
-  interimTranscript: string;
-  finalTranscript: string;
-  words: SpokenWordStatus[];
-  accuracyScore: number;
-  correctCount: number;
-  incorrectCount: number;
-  totalWordsCount: number;
-  isAllMatched: boolean;
-  errorMessage: string | null;
-  errorType?: 'permission' | 'network' | 'no-mic' | 'browser-unsupported' | 'unknown' | null;
-  diagnosticLog?: string[];
-}
-
 export type SwitchSound = 'blue' | 'brown' | 'bubble' | 'mute';
 
 export interface TypingSessionRecord {

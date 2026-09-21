@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { RotateCcw, Zap, Target, CheckCircle2, Volume2, Keyboard, Mic } from 'lucide-react';
+import { RotateCcw, Zap, Target, CheckCircle2, Volume2, Keyboard } from 'lucide-react';
 import { useTypingStore } from '../../store/useTypingStore';
-import LiveCaptionStream from '../voice/LiveCaptionStream';
 import VirtualKeyboard from './VirtualKeyboard';
 import { soundEngine } from '../../lib/audio';
 import { recordCompletedSession } from '../../lib/stats';
@@ -32,12 +31,7 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
   const containerRef = useRef<HTMLDivElement>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showKeyboard, setShowKeyboard] = useState(true);
-  const [spokenAccuracy, setSpokenAccuracy] = useState<number | null>(null);
   const hasRecordedRef = useRef(false);
-
-  const handleSpokenAccuracyChange = useCallback((acc: number) => {
-    setSpokenAccuracy(acc);
-  }, []);
 
   // Calculate live metrics
   const liveElapsed = startTime ? elapsedSeconds : 0;
@@ -177,19 +171,6 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
               </div>
             </div>
           </div>
-
-          {/* Spoken Accuracy */}
-          {spokenAccuracy !== null && (
-            <div className="flex items-center gap-2 animate-fadeIn">
-              <Mic className="h-5 w-5 text-rose-500" />
-              <div>
-                <div className="text-xs font-semibold uppercase text-gray-400">Oral Speech</div>
-                <div className="font-mono text-2xl font-black text-gray-900 dark:text-white">
-                  {spokenAccuracy}%
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Action Controls */}
@@ -220,7 +201,6 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
             type="button"
             onClick={() => {
               resetSession();
-              setSpokenAccuracy(null);
             }}
             title="Restart session (Esc)"
             className="flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-800"
@@ -275,17 +255,13 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
             </h3>
             <p className="mt-2 text-sm text-emerald-800/80 dark:text-emerald-300/80">
               You typed at <span className="font-bold">{wpm} WPM</span> with{' '}
-              <span className="font-bold">{accuracy}% typing accuracy</span>
-              {spokenAccuracy !== null && (
-                <> and <span className="font-bold">{spokenAccuracy}% spoken pronunciation accuracy</span></>
-              )}.
+              <span className="font-bold">{accuracy}% typing accuracy</span>.
             </p>
             <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
                 type="button"
                 onClick={() => {
                   resetSession();
-                  setSpokenAccuracy(null);
                 }}
                 className="rounded-xl border border-emerald-600/40 bg-white/80 px-4 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50 dark:border-emerald-700/50 dark:bg-gray-850 dark:text-emerald-300 dark:hover:bg-gray-800"
               >
@@ -309,13 +285,6 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
       {showKeyboard && (
         <VirtualKeyboard expectedChar={targetText[typedText.length]} />
       )}
-
-      {/* Chrome Live Captions & Spoken Word Evaluation Engine */}
-      <LiveCaptionStream
-        key={targetText}
-        targetText={targetText}
-        onAccuracyChange={handleSpokenAccuracyChange}
-      />
     </div>
   );
 }

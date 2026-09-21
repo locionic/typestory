@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { BookOpen, Mic, Sparkles, ArrowRight, Zap } from 'lucide-react';
+import { BookOpen, Sparkles, ArrowRight, Zap, Code } from 'lucide-react';
 import TypingEngine from '../components/typing/TypingEngine';
 import { STORIES } from '../data/stories';
 import { VOCAB_BANKS } from '../data/vocab';
@@ -12,17 +12,17 @@ export default function HomePage() {
       <div className="mb-10 text-center">
         <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1 text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 mb-4">
           <Sparkles className="h-3.5 w-3.5" />
-          <span>Typing Practice + Voice Pronunciation + English Stories</span>
+          <span>Touch Typing Practice • Full-Stack CV Mastery • Developer Stories</span>
         </div>
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-gray-900 dark:text-white leading-[1.15]">
-          Learn English by Typing &amp; Speaking Real Stories
+          Master Touch Typing with Real Stories &amp; Technical CV Sentences
         </h1>
         <p className="mx-auto mt-4 max-w-2xl text-base sm:text-lg text-gray-600 dark:text-gray-300 leading-relaxed">
-          Transform touch-typing into language fluency. Type through classic literature, inspiring essays, and tech history: then test your pronunciation using instant microphone voice feedback.
+          Build genuine speed and muscle memory. Practice typing software engineering resume highlights, RAG system architectures, cloud infrastructure sentences, and rich contextual stories.
         </p>
       </div>
 
-      {/* Live Interactive Typing & Microphone Arena */}
+      {/* Live Interactive Typing Arena */}
       <div className="mb-16">
         <TypingEngine />
       </div>
@@ -126,43 +126,43 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Why Typing + Speaking Works (SEO Content) */}
+      {/* Why Typing Technical CV Sentences & Stories Builds Speed */}
       <section className="mb-16 rounded-3xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Why Typing &amp; Speaking Boosts English Fluency Faster
+          Why Typing Technical CV Sentences Builds Real Developer Speed
         </h2>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3 text-sm">
           <div className="flex flex-col gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400">
               <Zap className="h-5 w-5" />
             </div>
-            <h3 className="font-bold text-gray-900 dark:text-white">Kinesthetic Muscle Memory</h3>
+            <h3 className="font-bold text-gray-900 dark:text-white">Technical Muscle Memory</h3>
             <p className="text-gray-600 dark:text-gray-300 leading-relaxed text-xs">
-              Typing forces you to encode English spelling letter-by-letter. Your fingers remember the spatial cadence of complex words far longer than passive flashcard scanning.
+              Typing framework names, library methods, and architecture terms letter-by-letter trains your fingers for live coding, terminal commands, and technical interviews.
             </p>
           </div>
           <div className="flex flex-col gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400">
-              <Mic className="h-5 w-5" />
+              <Code className="h-5 w-5" />
             </div>
-            <h3 className="font-bold text-gray-900 dark:text-white">Active Vocal Feedback</h3>
+            <h3 className="font-bold text-gray-900 dark:text-white">CV &amp; Interview Fluency</h3>
             <p className="text-gray-600 dark:text-gray-300 leading-relaxed text-xs">
-              Reading silently creates a false sense of confidence. Testing your voice with real-time speech recognition confirms whether your accent and phonetics are clearly understood.
+              Internalize your own professional accomplishments, RAG pipeline designs, and DevOps workflows so you can articulate them effortlessly during conversations.
             </p>
           </div>
           <div className="flex flex-col gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
               <BookOpen className="h-5 w-5" />
             </div>
-            <h3 className="font-bold text-gray-900 dark:text-white">Contextual Reading</h3>
+            <h3 className="font-bold text-gray-900 dark:text-white">Contextual Reading Cadence</h3>
             <p className="text-gray-600 dark:text-gray-300 leading-relaxed text-xs">
-              Isolated words are easily forgotten. By typing through complete stories and historical speeches, you absorb natural grammatical structures, collocations, and cadence in context.
+              Isolated words don&apos;t match how developers work. By typing complete sentences and paragraphs, you absorb natural grammatical rhythm and typing stamina.
             </p>
           </div>
         </div>
       </section>
 
-      {/* SEO Frequently Asked Questions */}
+      {/* Frequently Asked Questions */}
       <section className="mb-8">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
           Frequently Asked Questions
@@ -170,18 +170,18 @@ export default function HomePage() {
         <div className="space-y-4">
           <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
             <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              How does the microphone voice evaluation work?
+              What kind of CV practice sentences are included?
             </h3>
             <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              TypeStory utilizes the browser-native Web Speech Recognition API. When you speak into your microphone, the speech engine compares your words against the target English text in real-time, highlighting exact phonetic matches and calculating your pronunciation accuracy percentage.
+              We provide real-world software engineering sentences extracted directly from Truong Hong Loc&apos;s CV, covering Full-Stack engineering, Next.js 15, RAG architectures, dense retrieval, Azure PaaS, CI/CD automation, and TMA Solutions project workflows.
             </p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
             <h3 className="font-bold text-gray-900 dark:text-white mb-2">
-              Can I practice with my own English articles or textbooks?
+              Can I practice with my own English articles or custom text?
             </h3>
             <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              Yes. You can visit the Paste Text section to paste any English essay, news article, or study notes. TypeStory will instantly segment it into an interactive typing session with full audio narration and pronunciation testing.
+              Yes. Visit the Custom Text page to paste any resume bullet points, cover letters, technical documentation, or study notes. TypeStory will immediately load them into the typing engine.
             </p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
@@ -189,7 +189,7 @@ export default function HomePage() {
               Is TypeStory free to use?
             </h3>
             <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              Yes, TypeStory is 100% free and open to everyone. All typing stats, switch acoustics, and voice recognition tools run client-side in your browser with no account or subscription required.
+              Yes, TypeStory is 100% free. All typing metrics (WPM, accuracy, time), mechanical keyboard sounds, and stories run locally in your browser with zero sign-up required.
             </p>
           </div>
         </div>

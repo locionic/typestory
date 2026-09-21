@@ -7,7 +7,7 @@ import StoriesCatalog from '../../components/stories/StoriesCatalog';
 export const metadata: Metadata = {
   title: 'English Type-Along Stories: Practice Typing with Classic Literature & Fables',
   description:
-    'Browse and practice typing with English short stories, Aesop fables, O. Henry classics, and tech essays. Track WPM and test your pronunciation with microphone voice feedback.',
+    'Browse and practice typing with English short stories, Aesop fables, O. Henry classics, and tech essays. Track WPM, typing accuracy, and speed in real-time.',
   keywords: [
     'type along stories',
     'english typing stories',
@@ -30,7 +30,7 @@ export default function StoriesPage() {
           English Type-Along Stories
         </h1>
         <p className="mx-auto mt-3 max-w-2xl text-sm sm:text-base text-gray-600 dark:text-gray-300 leading-relaxed">
-          Improve typing speed and reading comprehension simultaneously. Choose a story below to start an interactive type-along session with native audio narration and voice evaluation.
+          Improve typing speed and reading comprehension simultaneously. Choose a story or CV practice module below to start an interactive touch typing session.
         </p>
       </div>
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SwitchSound, SpeechEvaluationResult, StoryItem, VocabItem } from '../lib/types';
+import { SwitchSound, StoryItem, VocabItem } from '../lib/types';
 import { soundEngine } from '../lib/audio';
 
 interface TypingState {
@@ -24,15 +24,11 @@ interface TypingState {
   switchSound: SwitchSound;
   autoVoicePlayback: boolean;
 
-  // Speech Recognition ("Micro Function")
-  latestSpeechResult: SpeechEvaluationResult | null;
-
   // Actions
   handleKeyInput: (key: string) => void;
   handleBackspace: () => void;
   setSound: (sound: SwitchSound) => void;
   toggleAutoVoice: () => void;
-  setSpeechResult: (result: SpeechEvaluationResult | null) => void;
   loadStory: (story: StoryItem) => void;
   loadVocabList: (list: VocabItem[], title?: string) => void;
   loadCustomText: (text: string, title?: string) => void;
@@ -40,10 +36,10 @@ interface TypingState {
 }
 
 export const useTypingStore = create<TypingState>((set, get) => ({
-  title: 'The Tortoise and the Hare',
+  title: 'Truong Hong Loc: Full-Stack Engineer Profile',
   sourceType: 'story',
   targetText:
-    'A Hare was once making fun of the Tortoise for his slow and steady pace. "Do you ever get anywhere?" he asked with a mocking laugh. "Yes," replied the Tortoise, "and I get there sooner than you think."',
+    'Full-stack engineer with 4+ years building production web applications across React/Next.js frontends, Node/Python backends, and cloud infrastructure. Hands-on experience with RAG pipelines, Azure PaaS services, CI/CD automation, and serverless architectures.',
   typedText: '',
   activeStory: null,
   activeVocabList: null,
@@ -58,7 +54,6 @@ export const useTypingStore = create<TypingState>((set, get) => ({
 
   switchSound: 'blue',
   autoVoicePlayback: true,
-  latestSpeechResult: null,
 
   handleKeyInput: (key: string) => {
     const state = get();
@@ -116,10 +111,6 @@ export const useTypingStore = create<TypingState>((set, get) => ({
     set((s) => ({ autoVoicePlayback: !s.autoVoicePlayback }));
   },
 
-  setSpeechResult: (result: SpeechEvaluationResult | null) => {
-    set({ latestSpeechResult: result });
-  },
-
   loadStory: (story: StoryItem) => {
     const fullText = story.paragraphs.join(' ');
     set({
@@ -136,7 +127,6 @@ export const useTypingStore = create<TypingState>((set, get) => ({
       correctKeystrokes: 0,
       incorrectKeystrokes: 0,
       isCompleted: false,
-      latestSpeechResult: null,
     });
   },
 
@@ -157,7 +147,6 @@ export const useTypingStore = create<TypingState>((set, get) => ({
       correctKeystrokes: 0,
       incorrectKeystrokes: 0,
       isCompleted: false,
-      latestSpeechResult: null,
     });
   },
 
@@ -177,7 +166,6 @@ export const useTypingStore = create<TypingState>((set, get) => ({
       correctKeystrokes: 0,
       incorrectKeystrokes: 0,
       isCompleted: false,
-      latestSpeechResult: null,
     });
   },
 
@@ -190,7 +178,6 @@ export const useTypingStore = create<TypingState>((set, get) => ({
       correctKeystrokes: 0,
       incorrectKeystrokes: 0,
       isCompleted: false,
-      latestSpeechResult: null,
     });
   },
 }));
