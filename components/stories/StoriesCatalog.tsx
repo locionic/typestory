@@ -11,7 +11,7 @@ interface StoriesCatalogProps {
 
 const CATEGORIES = [
   { id: 'all', label: 'All Stories' },
-  { id: 'tech', label: 'Tech & CV Practice' },
+  { id: 'tech', label: 'Tech & Engineering' },
   { id: 'fable', label: 'Fables' },
   { id: 'classic', label: 'Classics' },
   { id: 'essay', label: 'Speeches & Essays' },

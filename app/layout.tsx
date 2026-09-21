@@ -5,31 +5,31 @@ import Navbar from '../components/Navbar';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://typestory.app'),
-  title: 'TypeStory: Learn English by Typing & Speaking Stories',
+  title: 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary',
   description:
-    'Master touch typing, expand English vocabulary, and test your pronunciation with real-world stories, Oxford 3000 words, and native microphone speech recognition.',
+    'Master touch typing, expand English vocabulary, and build muscle memory with real-world stories, Oxford 3000 words, and full-stack software engineering concepts.',
   keywords: [
     'learn english by typing',
     'touch typing english',
     'typing test with stories',
-    'english pronunciation mic test',
+    'software engineer typing practice',
     'qwerty learner english',
     'type along stories',
     'english muscle memory',
-    'speech typing practice',
+    'developer typing practice',
   ],
   authors: [{ name: 'TypeStory Team' }],
   openGraph: {
-    title: 'TypeStory: Learn English by Typing & Speaking Stories',
+    title: 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary',
     description:
-      'Practice touch typing while absorbing rich English stories, Oxford 3000 vocabulary, and real-time microphone pronunciation feedback.',
+      'Practice touch typing while absorbing rich English stories, Oxford 3000 vocabulary, and full-stack engineering architecture concepts.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'TypeStory: Learn English by Typing & Speaking Stories',
+    title: 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary',
     description:
-      'Practice touch typing while absorbing rich English stories, Oxford 3000 vocabulary, and real-time microphone pronunciation feedback.',
+      'Practice touch typing while absorbing rich English stories, Oxford 3000 vocabulary, and full-stack engineering architecture concepts.',
   },
 };
 
@@ -52,7 +52,7 @@ export default function RootLayout({
               applicationCategory: 'EducationalApplication',
               operatingSystem: 'All',
               description:
-                'Interactive touch typing and English language learning platform combining real-world stories with microphone voice assessment.',
+                'Interactive touch typing and English language learning platform combining real-world stories, technical vocabulary, and mechanical keyboard audio.',
               offers: {
                 '@type': 'Offer',
                 price: '0',
@@ -68,7 +68,7 @@ export default function RootLayout({
         <footer className="border-t border-gray-200 bg-white py-8 text-center text-xs text-gray-500 dark:border-gray-800 dark:bg-gray-950">
           <div className="mx-auto max-w-6xl px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
-              &copy; {new Date().getFullYear()} TypeStory. Free open-access English typing and speech trainer.
+              &copy; {new Date().getFullYear()} TypeStory. Free open-access touch typing and English learning platform.
             </div>
             <div className="flex gap-4">
               <Link href="/stories" className="hover:text-indigo-600">Stories</Link>

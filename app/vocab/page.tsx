@@ -40,13 +40,13 @@ export default function VocabPage() {
       <div className="mb-8 text-center">
         <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1 text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 mb-3">
           <Bookmark className="h-3.5 w-3.5" />
-          <span>Flashcard Typing &amp; Voice Drills</span>
+          <span>Flashcard Typing &amp; Phonetics</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-black text-gray-900 dark:text-white">
           English Word Banks
         </h1>
         <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-          Build spatial keyboard memory for essential English terms. Type each word, listen to native phonetics, and test your spoken pronunciation.
+          Build spatial keyboard memory for essential English terms. Type each word, listen to native phonetics, and master accurate spelling.
         </p>
       </div>
 
@@ -146,7 +146,7 @@ export default function VocabPage() {
         </div>
       </div>
 
-      {/* Typing & Microphone Assessment Engine */}
+      {/* Typing Engine */}
       <TypingEngine
         onNext={currentWordIndex < words.length - 1 ? handleNext : undefined}
         nextLabel="Next Word"

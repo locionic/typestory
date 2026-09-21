@@ -126,10 +126,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Why Typing Technical CV Sentences & Stories Builds Speed */}
+      {/* Why Typing Technical Sentences & Stories Builds Speed */}
       <section className="mb-16 rounded-3xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Why Typing Technical CV Sentences Builds Real Developer Speed
+          Why Typing Technical Engineering Sentences Builds Real Developer Speed
         </h2>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3 text-sm">
           <div className="flex flex-col gap-2">
@@ -145,9 +145,9 @@ export default function HomePage() {
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400">
               <Code className="h-5 w-5" />
             </div>
-            <h3 className="font-bold text-gray-900 dark:text-white">CV &amp; Interview Fluency</h3>
+            <h3 className="font-bold text-gray-900 dark:text-white">Architecture &amp; Interview Fluency</h3>
             <p className="text-gray-600 dark:text-gray-300 leading-relaxed text-xs">
-              Internalize your own professional accomplishments, RAG pipeline designs, and DevOps workflows so you can articulate them effortlessly during conversations.
+              Internalize production system patterns, RAG pipeline designs, and DevOps workflows so you can articulate them effortlessly during engineering discussions.
             </p>
           </div>
           <div className="flex flex-col gap-2">

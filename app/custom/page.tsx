@@ -41,10 +41,10 @@ export default function CustomTextPage() {
           <span>Paste Any Text or Article</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-black text-gray-900 dark:text-white">
-          Custom Type &amp; Speak Practice
+          Custom Touch Typing Practice
         </h1>
         <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-          Paste your own English reading assignment, novel chapter, or study notes. Practice typing it and test your pronunciation with the microphone.
+          Paste your own English reading assignment, novel chapter, or study notes. Practice touch typing it with real-time WPM, accuracy tracking, and mechanical keyboard audio.
         </p>
       </div>
 
@@ -98,7 +98,7 @@ export default function CustomTextPage() {
         </div>
       </div>
 
-      {/* Typing & Microphone Arena */}
+      {/* Typing Arena */}
       {isSessionActive && <TypingEngine />}
     </div>
   );

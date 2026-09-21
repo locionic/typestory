@@ -94,7 +94,7 @@ export default function StoryReader({ story }: StoryReaderProps) {
         </div>
       </div>
 
-      {/* Active Typing & Voice Engine for this Paragraph */}
+      {/* Active Typing Engine for this Paragraph */}
       <TypingEngine
         onNext={currentParagraphIndex < paragraphs.length - 1 ? handleNext : undefined}
         nextLabel="Next Paragraph"
