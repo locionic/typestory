@@ -12,11 +12,11 @@ export interface VocabCategory {
 
 export const VOCAB_BANKS: VocabCategory[] = [
   {
-    id: 'fullstack-cloud-cv',
-    slug: 'fullstack-cloud-cv',
+    id: 'fullstack-cloud-engineering',
+    slug: 'fullstack-cloud-engineering',
     title: 'Full-Stack, RAG & Cloud Terminology',
-    description: 'Technical terminology and system architecture vocabulary from Truong Hong Loc\'s software engineering CV.',
-    badge: 'CV & Tech Stack',
+    description: 'Master technical terminology and system architecture vocabulary used by modern full-stack and cloud engineers.',
+    badge: 'Tech & Architecture',
     iconEmoji: '🚀',
     words: [
       {

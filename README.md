@@ -1,21 +1,20 @@
-# TypeStory (Learn English by Typing & Speaking Stories)
+# TypeStory (Master Touch Typing with Real Stories & Technical Vocabulary)
 
-TypeStory is an interactive, open-access keyboard typing and English language learning platform. Inspired by the muscle-memory concept of `qwerty-learner`, TypeStory combines touch typing practice with real-world English stories, Oxford 3000 vocabulary banks, mechanical keyboard audio feedback, and native microphone speech recognition.
+TypeStory is an interactive, open-access keyboard typing and language learning platform. Inspired by the muscle-memory concept of `qwerty-learner`, TypeStory combines touch typing practice with real-world English stories, Oxford 3000 vocabulary banks, mechanical keyboard audio feedback, and technical software engineering practice modules.
 
 ---
 
 ## Key Features
 
-1. **Contextual Story Typing Practice:**
-   - Instead of typing random characters or isolated words, practice with authentic literature, speeches, history, and real-life dialogues (Aesop Fables, O. Henry, Steve Jobs Commencement Speech, Tim Berners-Lee Web History, Daily Coffee Shop Dialogue).
+1. **Contextual Story & Tech Typing Practice:**
+   - Instead of typing random characters or isolated words, practice with authentic literature, software engineering architectures, speeches, history, and real-life dialogues (Full-Stack, RAG pipelines, Cloud DevOps, Distributed Systems, Aesop Fables, Steve Jobs Commencement Speech).
    - Paragraph-by-paragraph progression with auto-advance, backspace correction, real-time WPM, accuracy %, and error tracking.
    - Built-in English-Vietnamese vocabulary glossaries with phonetics and parts of speech for every story.
 
-2. **Microphone Pronunciation Assessment (Native Speech Recognition):**
-   - Built with the browser-native Web Speech API (`SpeechRecognition` and `webkitSpeechRecognition`).
-   - Listen to native Text-To-Speech (TTS) narration with customizable accents and speech rates.
-   - Click the microphone icon to read sentences aloud: the engine compares recognized speech against target text using normalized phonetic token alignment, reporting an accuracy percentage and highlight breakdown.
-   - Zero external cloud latency, zero API costs, and 100% client-side privacy.
+2. **Native Text-To-Speech Pronunciation Audio:**
+   - Listen to native Text-To-Speech (TTS) narration with customizable speech rates.
+   - Hear correct pronunciation of complex technical vocabulary and literary terms before or while typing.
+   - Zero external cloud latency, zero API costs, and 100% client-side execution.
 
 3. **Mechanical Keyboard Audio Synthesizer:**
    - Synthesizes authentic keyboard switch sounds directly using the HTML5 Web Audio API (Cherry MX Blue clicky, Cherry MX Brown tactile, Bubble pop, and Mute mode).
@@ -43,7 +42,7 @@ TypeStory is an interactive, open-access keyboard typing and English language le
    - Flashcard style word-by-word typing practice with phonetic IPA notation, definitions, and translations.
 
 8. **Custom Text Paste Arena:**
-   - Paste any article, homework text, coding documentation, or speech to immediately start typing and speaking practice.
+   - Paste any article, homework text, coding documentation, or speech to immediately start typing and listening practice.
 
 9. **Engineered for Fast Organic Search Growth (SEO):**
    - 100% statically pre-rendered routes (SSG) for all stories (`/stories/[slug]`), word banks (`/vocab`), and custom mode (`/custom`).

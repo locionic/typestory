@@ -36,10 +36,10 @@ interface TypingState {
 }
 
 export const useTypingStore = create<TypingState>((set, get) => ({
-  title: 'Truong Hong Loc: Full-Stack Engineer Profile',
+  title: 'Full-Stack Architecture & Cloud Systems',
   sourceType: 'story',
   targetText:
-    'Full-stack engineer with 4+ years building production web applications across React/Next.js frontends, Node/Python backends, and cloud infrastructure. Hands-on experience with RAG pipelines, Azure PaaS services, CI/CD automation, and serverless architectures.',
+    'Building modern web applications requires mastering React and Next.js frontends, type-safe backends, and cloud infrastructure. Hands-on knowledge of RAG pipelines, containerization, and automated CI/CD pipelines ensures reliable production software.',
   typedText: '',
   activeStory: null,
   activeVocabList: null,
