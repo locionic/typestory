@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# progress sync store (lib/progress-store.ts)
+/.data
+
 # next.js
 /.next/
 /out/

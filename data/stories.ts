@@ -1,6 +1,6 @@
 import { StoryItem } from '../lib/types';
 
-export const STORIES: StoryItem[] = [
+const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
   {
     id: 'tech-story-1',
     slug: 'modern-full-stack-web-architecture',
@@ -11,7 +11,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Full-Stack Q&A',
     summary:
       'Master technical interview questions and answers on Next.js 15 App Router, React Server Components, TypeScript type safety, and clean API design.',
-    wordCount: 265,
     readingTimeMinutes: 2,
     coverEmoji: '⚡',
     paragraphs: [
@@ -62,7 +61,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'AI & RAG Q&A',
     summary:
       'Master technical interview questions and answers on Retrieval-Augmented Generation, document chunking, dense vector retrieval, and cross-encoder reranking.',
-    wordCount: 290,
     readingTimeMinutes: 2,
     coverEmoji: '🤖',
     paragraphs: [
@@ -114,7 +112,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'DevOps & Cloud Q&A',
     summary:
       'Master technical interview questions and answers on GitHub Actions CI/CD pipelines, Docker networking, Playwright automation, and Terraform IaC.',
-    wordCount: 285,
     readingTimeMinutes: 2,
     coverEmoji: '☁️',
     paragraphs: [
@@ -166,7 +163,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'System Design Q&A',
     summary:
       'Master technical interview questions and answers on relational versus NoSQL databases, inverted indices in Elasticsearch, cursor pagination, and Redis caching.',
-    wordCount: 275,
     readingTimeMinutes: 2,
     coverEmoji: '💾',
     paragraphs: [
@@ -217,7 +213,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Beginner Friendly',
     summary:
       'The classic fable of humility and steady perseverance. A speedy hare ridicules a slow tortoise, challenging him to an unforgettable race.',
-    wordCount: 285,
     readingTimeMinutes: 2,
     coverEmoji: '🐢',
     paragraphs: [
@@ -269,7 +264,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Intermediate',
     summary:
       'A timeless Christmas tale of selfless love. A young couple sacrifices their most prized possessions to buy secret gifts for one another.',
-    wordCount: 395,
     readingTimeMinutes: 3,
     coverEmoji: '🎁',
     paragraphs: [
@@ -322,7 +316,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Inspirational Speech',
     summary:
       'Excerpts from Steve Jobs iconic 2005 Stanford commencement address on connecting the dots, loving what you do, and trusting your inner voice.',
-    wordCount: 340,
     readingTimeMinutes: 3,
     coverEmoji: '💡',
     paragraphs: [
@@ -375,7 +368,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Technology & History',
     summary:
       'In 1989, a British scientist at CERN wrote a proposal that quietly changed human history forever: the World Wide Web.',
-    wordCount: 310,
     readingTimeMinutes: 2,
     coverEmoji: '🌐',
     paragraphs: [
@@ -427,7 +419,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Daily Conversation',
     summary:
       'A realistic conversation between a customer and a barista in a busy artisanal coffee shop. Master everyday spoken English phrases.',
-    wordCount: 260,
     readingTimeMinutes: 2,
     coverEmoji: '☕',
     paragraphs: [
@@ -480,7 +471,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Intermediate Mystery',
     summary:
       'Sherlock Holmes investigates a bizarre London society offering lucrative pay to men with fiery red hair, unraveling an ingenious subterranean bank heist.',
-    wordCount: 310,
     readingTimeMinutes: 3,
     coverEmoji: '🕵️‍♂️',
     paragraphs: [
@@ -531,7 +521,6 @@ export const STORIES: StoryItem[] = [
     difficultyLabel: 'Tech History',
     summary:
       'On September 9, 1947, engineers testing the electro-mechanical Harvard Mark II found an actual moth stuck inside Relay 70, immortalizing the term "debugging".',
-    wordCount: 295,
     readingTimeMinutes: 2,
     coverEmoji: '🦋',
     paragraphs: [
@@ -573,3 +562,16 @@ export const STORIES: StoryItem[] = [
     ],
   },
 ];
+
+/**
+ * Word counts are derived, never hand-written.
+ *
+ * Every one of the eleven hand-entered counts was wrong by 30-58%, which put the
+ * catalog cards, the shortest/longest sort order and the JSON-LD all out of step
+ * with the text the learner is actually asked to type. Editing a paragraph now
+ * cannot desync them again.
+ */
+export const STORIES: StoryItem[] = RAW_STORIES.map((story) => ({
+  ...story,
+  wordCount: story.paragraphs.join(' ').trim().split(/\s+/).filter(Boolean).length,
+}));

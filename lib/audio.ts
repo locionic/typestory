@@ -113,11 +113,19 @@ class SoundEngine {
       utterance.rate = 0.95; // Slightly measured rate for language learning
       utterance.pitch = 1.0;
 
-      // Prefer a natural English voice if available
+      // Read fresh on every call rather than caching: Chrome populates this list in
+      // the background, so a single cached read taken before the list loaded would
+      // pin the whole session to whatever the browser defaults to.
+      //
+      // The locale has to win outright. A single combined `locale || lang` test
+      // short-circuits on the first English voice in the list, so an en-AU voice
+      // registered ahead of an en-US one beat the exact match — and `rate: 0.95` is
+      // a teaching setting, so the accent the learner hears is part of the lesson.
+      // The language-wide match is the fallback for when no exact locale exists.
       const voices = window.speechSynthesis.getVoices();
-      const matchedVoice = voices.find(
-        (v) => v.lang.startsWith(voiceLang) || v.lang.startsWith('en')
-      );
+      const matchedVoice =
+        voices.find((v) => v.lang === voiceLang) ??
+        voices.find((v) => v.lang.startsWith('en'));
       if (matchedVoice) {
         utterance.voice = matchedVoice;
       }

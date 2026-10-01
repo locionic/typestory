@@ -1,8 +1,30 @@
 'use client';
 
-import React from 'react';
-import { X, Flame, Zap, Target, BookOpen, Clock, Trash2, Award, CheckCircle2 } from 'lucide-react';
-import { useUserStats, clearUserStats } from '../../lib/stats';
+import React, { useState } from 'react';
+import {
+  X,
+  Flame,
+  Zap,
+  Target,
+  BookOpen,
+  Clock,
+  Trash2,
+  Award,
+  CheckCircle2,
+  CloudUpload,
+  CloudOff,
+  Copy,
+  Download,
+} from 'lucide-react';
+import { useUserStats, clearUserStats, saveUserStats } from '../../lib/stats';
+import {
+  useBackupCode,
+  enableBackup,
+  disableBackup,
+  adoptBackupCode,
+  fetchBackup,
+  pushProgress,
+} from '../../lib/progress-client';
 
 interface StatsModalProps {
   isOpen: boolean;
@@ -11,6 +33,78 @@ interface StatsModalProps {
 
 export default function StatsModal({ isOpen, onClose }: StatsModalProps) {
   const stats = useUserStats();
+  const backupCode = useBackupCode();
+  const [codeInput, setCodeInput] = useState('');
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  const startBackup = () => {
+    if (!enableBackup()) {
+      setBackupMessage('This browser will not let the app store a backup code.');
+      return;
+    }
+    // Upload what is already here rather than making the first backup wait for the
+    // next finished passage.
+    pushProgress(stats);
+    setBackupMessage('Backup is on. Keep this code — it is the only way back in.');
+  };
+
+  const stopBackup = () => {
+    const ok = confirm(
+      'Stop backing up and delete the stored copy? Your progress stays in this browser, ' +
+        'but there will be nothing left to restore from.',
+    );
+    if (!ok) return;
+    disableBackup();
+    setCodeInput('');
+    setBackupMessage('Backup is off, and the stored copy was deleted.');
+  };
+
+  const copyCode = async () => {
+    if (!backupCode) return;
+    if (!navigator.clipboard) {
+      setBackupMessage('Clipboard access is blocked here — select the code and copy it.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(backupCode);
+      setBackupMessage('Code copied.');
+    } catch {
+      setBackupMessage('Could not copy — select the code and copy it by hand.');
+    }
+  };
+
+  const restore = async () => {
+    const wanted = codeInput.trim();
+    setRestoring(true);
+    const found = await fetchBackup(wanted);
+
+    if (!found.ok) {
+      setBackupMessage(found.error);
+      setRestoring(false);
+      return;
+    }
+
+    // Confirm only now: there is nothing to warn about until a backup has been
+    // found. Without one of its own, this device's copy cannot be recovered.
+    const ok = confirm(
+      backupCode
+        ? 'Replace the progress on this device with that backup? What is here now ' +
+            'stays recoverable under this device’s own code.'
+        : 'Replace the progress on this device with that backup? This device has no ' +
+            'backup of its own, so what is here now cannot be recovered.',
+    );
+    if (!ok) {
+      setRestoring(false);
+      return;
+    }
+
+    adoptBackupCode(wanted);
+    saveUserStats(found.stats);
+    setCodeInput('');
+    setBackupMessage('Restored. This device backs up to that code from now on.');
+    setRestoring(false);
+  };
 
   if (!isOpen) return null;
 
@@ -133,7 +227,7 @@ export default function StatsModal({ isOpen, onClose }: StatsModalProps) {
                 {stats.averageAccuracy}%
               </div>
               <div className="text-[10px] text-emerald-700/80 dark:text-emerald-400/70">
-                Lifetime average
+                Last 100 sessions
               </div>
             </div>
 
@@ -150,6 +244,101 @@ export default function StatsModal({ isOpen, onClose }: StatsModalProps) {
                 words (~{totalMinutes} min)
               </div>
             </div>
+          </div>
+
+          {/* Progress Backup */}
+          <div className="rounded-2xl border border-gray-200 bg-gray-50/40 p-4 dark:border-gray-800 dark:bg-gray-850/40">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-400">
+                {backupCode ? (
+                  <CloudUpload className="h-4 w-4 text-indigo-500" />
+                ) : (
+                  <CloudOff className="h-4 w-4 text-gray-400" />
+                )}
+                Progress Backup
+              </h3>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  backupCode
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                    : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-300'
+                }`}
+              >
+                {backupCode ? 'On' : 'Off'}
+              </span>
+            </div>
+
+            {!backupCode ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="max-w-sm text-xs leading-snug text-gray-500 dark:text-gray-400">
+                  Your history lives in this browser only. A backup keeps a copy on the
+                  server you can restore after clearing site data or switching machines.
+                </p>
+                <button
+                  type="button"
+                  onClick={startBackup}
+                  className="flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-700 transition hover:bg-indigo-100 dark:border-indigo-900/50 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-950/70"
+                >
+                  <CloudUpload className="h-3.5 w-3.5" />
+                  <span>Back up my progress</span>
+                </button>
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="select-all break-all rounded-lg border border-gray-200 bg-white px-2 py-1 font-mono text-[11px] text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                    {backupCode}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={copyCode}
+                    className="flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-600 transition hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    <Copy className="h-3 w-3" />
+                    <span>Copy</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopBackup}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-rose-500 transition hover:text-rose-600"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    <span>Stop and delete</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Available in both states: restoring onto a device that has lost its
+                data is exactly the case where no code exists here yet. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                aria-label="Backup code to restore from"
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value)}
+                placeholder="Paste a backup code"
+                className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 font-mono text-xs text-gray-700 placeholder:font-sans focus:border-indigo-400 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              />
+              <button
+                type="button"
+                onClick={restore}
+                disabled={restoring || !codeInput.trim()}
+                className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                <Download className="h-3.5 w-3.5 text-indigo-500" />
+                <span>{restoring ? 'Restoring…' : 'Restore'}</span>
+              </button>
+            </div>
+            <p className="mt-1.5 text-[10px] leading-snug text-gray-400">
+              Restoring replaces everything on this device and points it at that code.
+            </p>
+
+            {backupMessage && (
+              <p role="status" className="mt-3 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">
+                {backupMessage}
+              </p>
+            )}
           </div>
 
           {/* Achievement Badges */}

@@ -1,5 +1,7 @@
 export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
+export type SourceType = 'story' | 'vocab' | 'custom';
+
 export interface VocabItem {
   word: string;
   phonetic?: string;
@@ -32,7 +34,7 @@ export interface TypingSessionRecord {
   timestamp: number;
   dateStr: string; // YYYY-MM-DD
   title: string;
-  sourceType: 'story' | 'vocab' | 'custom';
+  sourceType: SourceType;
   wpm: number;
   accuracy: number;
   durationSeconds: number;

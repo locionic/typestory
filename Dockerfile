@@ -44,4 +44,10 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# lib/progress-store.ts writes one JSON file per device. /app is root-owned under
+# USER nextjs, so the default (${cwd}/.data) would fail with EACCES. /tmp is writable.
+# This is still ephemeral storage: it dies with the container, which is exactly why
+# db/schema.sql exists. Move to Postgres before trusting this with real progress.
+ENV TYPE_STORY_DATA_DIR=/tmp/typestory-data
+
 CMD ["node", "server.js"]

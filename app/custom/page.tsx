@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useTypingStore } from '../../store/useTypingStore';
+import { normalizeTypableText, useTypingStore } from '../../store/useTypingStore';
 import TypingEngine from '../../components/typing/TypingEngine';
 import { FileText, Play } from 'lucide-react';
 
@@ -26,8 +26,21 @@ export default function CustomTextPage() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const { loadCustomText } = useTypingStore();
 
+  // What the board will actually be asked to type, not what the textarea holds.
+  //
+  // `inputText.trim()` was the gate, and it answers a different question from the one
+  // the board asks: trim() removes whitespace, while normalizeTypableText also deletes
+  // the zero-width and bidi characters a Google Docs or PDF paste arrives with — the
+  // store's own comment names both. So a paste made only of those passed the gate,
+  // normalised to an empty string, and opened a fully rendered typing arena with a
+  // blank board: every keystroke was swallowed by handleKeyInput's empty-target guard,
+  // `isCompleted` never became true, and no session was ever recorded. Nothing on
+  // screen said why. Asking the same question the board answers fixes it at the gate,
+  // and the disabled button is the honest explanation.
+  const typable = normalizeTypableText(inputText);
+
   const handleStart = () => {
-    if (!inputText.trim()) return;
+    if (!typable) return;
     loadCustomText(inputText, customTitle || 'Custom Text');
     setIsSessionActive(true);
   };
@@ -84,12 +97,12 @@ export default function CustomTextPage() {
 
         <div className="mt-4 flex justify-between items-center">
           <span className="text-xs text-gray-400">
-            {inputText.trim() ? inputText.trim().split(/\s+/).length : 0} words
+            {typable ? typable.split(/\s+/).length : 0} words
           </span>
           <button
             type="button"
             onClick={handleStart}
-            disabled={!inputText.trim()}
+            disabled={!typable}
             className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-500/20 transition hover:bg-indigo-500 disabled:opacity-40"
           >
             <Play className="h-4 w-4" />

@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { RotateCcw, Zap, Target, CheckCircle2, Volume2, Keyboard } from 'lucide-react';
 import { useTypingStore } from '../../store/useTypingStore';
 import VirtualKeyboard from './VirtualKeyboard';
 import { soundEngine } from '../../lib/audio';
-import { recordCompletedSession } from '../../lib/stats';
+import { finishedSeconds, recordCompletedSession, wpmFrom } from '../../lib/stats';
 
 interface TypingEngineProps {
   onNext?: () => void;
@@ -20,25 +20,31 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
     targetText,
     typedText,
     startTime,
+    endTime,
+    elapsedSeconds,
     totalKeystrokes,
     correctKeystrokes,
     isCompleted,
+    hasRecordedSession,
     handleKeyInput,
     handleBackspace,
+    tick,
     resetSession,
+    markSessionRecorded,
   } = useTypingStore();
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showKeyboard, setShowKeyboard] = useState(true);
-  const hasRecordedRef = useRef(false);
 
   // Calculate live metrics
-  const liveElapsed = startTime ? elapsedSeconds : 0;
-  const wpm =
-    liveElapsed > 0
-      ? Math.round((correctKeystrokes / 5) / (liveElapsed / 60))
-      : 0;
+  //
+  // The card below and recordCompletedSession both read `wpm`, so the number a
+  // learner reads off the completion card is by construction the number stored
+  // against the session. They did not always: the card came off the 250ms display
+  // tick and the record off the run's own stamps, and the tick both floors and stops
+  // on completion — so the card read a WPM the history never held, always a higher
+  // one. See finishedSeconds.
+  const finishedRunSeconds = finishedSeconds(startTime, endTime, elapsedSeconds);
+  const wpm = wpmFrom(correctKeystrokes, finishedRunSeconds);
 
   const accuracy =
     totalKeystrokes > 0
@@ -58,57 +64,56 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
   useEffect(() => {
     if (!startTime || isCompleted) return;
 
-    const interval = setInterval(() => {
-      setElapsedSeconds(Math.max(1, Math.floor((Date.now() - startTime) / 1000)));
-    }, 250);
+    const interval = setInterval(tick, 250);
 
     return () => clearInterval(interval);
-  }, [startTime, isCompleted]);
+  }, [startTime, isCompleted, tick]);
 
   // Confetti on completion & persistent stats recording
   useEffect(() => {
-    if (isCompleted && !hasRecordedRef.current) {
-      hasRecordedRef.current = true;
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-      });
+    if (!isCompleted || hasRecordedSession) return;
 
-      const wordsCount = targetText.trim().split(/\s+/).filter(Boolean).length;
-      recordCompletedSession({
-        title,
-        sourceType,
-        wpm,
-        accuracy,
-        durationSeconds: liveElapsed,
-        wordsCount,
-        keystrokes: totalKeystrokes,
-      });
-    }
+    markSessionRecorded();
+    confetti({
+      particleCount: 80,
+      spread: 70,
+      origin: { y: 0.6 },
+    });
+
+    // The same clock the card above reads, so the two cannot disagree.
+    recordCompletedSession({
+      title,
+      sourceType,
+      wpm,
+      accuracy,
+      durationSeconds: finishedRunSeconds,
+      wordsCount: targetText.trim().split(/\s+/).filter(Boolean).length,
+      keystrokes: totalKeystrokes,
+    });
   }, [
     isCompleted,
+    hasRecordedSession,
+    markSessionRecorded,
     title,
     sourceType,
     targetText,
     wpm,
+    finishedRunSeconds,
     accuracy,
-    liveElapsed,
     totalKeystrokes,
   ]);
-
-  // Reset recording guard on session reset
-  useEffect(() => {
-    if (!isCompleted) {
-      hasRecordedRef.current = false;
-    }
-  }, [isCompleted]);
 
   // Global keydown listener for zero-friction typing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore functional hotkeys (Cmd+R, Ctrl+Shift+I, etc.)
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // A focused text field owns its own keystrokes. Without this the engine
+      // swallows every character typed into the /custom textarea and files it
+      // against the typing board as an error, and Escape there restarts the run.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable]')) return;
 
       if (e.key === 'Backspace') {
         e.preventDefault();
@@ -139,7 +144,7 @@ export default function TypingEngine({ onNext, nextLabel = 'Next' }: TypingEngin
   }, [handleKeyInput, handleBackspace, resetSession, isCompleted, onNext]);
 
   return (
-    <div className="flex flex-col gap-6" ref={containerRef}>
+    <div className="flex flex-col gap-6">
       {/* Live Stats Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-center gap-6">

@@ -18,7 +18,11 @@ export default function VocabPage() {
   // Load active word into typing store
   useEffect(() => {
     if (currentItem) {
-      loadCustomText(currentItem.word, `${selectedBank.title} (${currentWordIndex + 1}/${words.length})`);
+      loadCustomText(
+        currentItem.word,
+        `${selectedBank.title} (${currentWordIndex + 1}/${words.length})`,
+        'vocab',
+      );
     }
   }, [selectedBank, currentWordIndex, currentItem, loadCustomText, words.length]);
 

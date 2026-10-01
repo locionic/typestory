@@ -20,7 +20,11 @@ export default function StoryReader({ story }: StoryReaderProps) {
 
   // Load active paragraph into typing store
   useEffect(() => {
-    loadCustomText(currentParagraph, `${story.title} (Part ${currentParagraphIndex + 1}/${paragraphs.length})`);
+    loadCustomText(
+      currentParagraph,
+      `${story.title} (Part ${currentParagraphIndex + 1}/${paragraphs.length})`,
+      'story',
+    );
   }, [currentParagraphIndex, currentParagraph, story.title, loadCustomText, paragraphs.length]);
 
   const handleNext = () => {
@@ -111,11 +115,20 @@ export default function StoryReader({ story }: StoryReaderProps) {
             const isQA = p.startsWith('Q:') && p.includes(' A:');
             const [qPart, aPart] = isQA ? p.split(' A:') : [p, ''];
 
+            // A button, not a div with an onClick: this panel is how a learner jumps
+            // the typing board to any paragraph, and it was the only interactive
+            // element in the app that could not be reached or activated from the
+            // keyboard — in an app about the keyboard. The rest of the codebase
+            // already uses `<button type="button">` for this; this one had drifted.
+            // `font-[inherit]` and `text-left` are needed because a button inherits
+            // neither the body's font nor its text alignment.
             return (
-              <div
+              <button
+                type="button"
                 key={idx}
                 onClick={() => setCurrentParagraphIndex(idx)}
-                className={`cursor-pointer rounded-2xl p-4 transition-all ${
+                aria-current={idx === currentParagraphIndex}
+                className={`block w-full cursor-pointer rounded-2xl p-4 text-left font-[inherit] transition-all ${
                   idx === currentParagraphIndex
                     ? 'bg-indigo-50/90 font-medium text-gray-900 shadow-sm ring-2 ring-indigo-400 dark:bg-indigo-950/40 dark:text-white dark:ring-indigo-600'
                     : 'hover:bg-gray-50 dark:hover:bg-gray-800/40 opacity-75'
@@ -141,7 +154,7 @@ export default function StoryReader({ story }: StoryReaderProps) {
                 ) : (
                   <p>{p}</p>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
