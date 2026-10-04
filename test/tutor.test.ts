@@ -104,6 +104,31 @@ describe('parseTutorRequest', () => {
     );
   });
 
+  /**
+   * The seam the alternation check never crossed.
+   *
+   * `lib/ai.ts` sends `[...history, { role: 'user' }]` — the current turn is *appended*
+   * to the history, not substituted for it — so the array that reaches the API has one
+   * more turn than the one validated here, and its final turn is always a learner turn.
+   * The loop compares `history[i]` against `history[i - 1]` from index 1, so every pair
+   * *inside* the history is checked and the pair straddling the seam is not. An odd
+   * length ending on `user` therefore satisfies every rule in this file and hands the API
+   * two learner turns running — which it rejects outright.
+   *
+   * That 400 lands in the route's catch-all and is reported as `502 ai_unavailable`: the
+   * learner's own malformed history, announced as our outage. This is the failure the
+   * in-history alternation check was written for, reached one turn further on than where
+   * the check stops.
+   *
+   * Reachable without exotic input: `trimHistory` drops whole pairs, so this page cannot
+   * post it. It is what any other caller of a public POST route can.
+   */
+  it('refuses a history that runs on past the learner’s last turn', () => {
+    // Path is the offending history turn, not the whole history: it is the one the caller
+    // has to drop, and the appended turn has no index of its own to point at.
+    expectRejected({ history: [turn('user', 'a')], message: 'why?' }, 'history[0]');
+  });
+
   it('still accepts a history that alternates all the way to the cap', () => {
     // The guard on the guard: dropping every other turn, or over-rejecting, would
     // break the one shape the API is happy with.
@@ -142,13 +167,27 @@ describe('parseTutorReply', () => {
   });
 
   /**
-   * The reply is re-posted as history on the next turn. A reply over the cap would
-   * 400 the learner's *next* question with an error about something they never typed.
+   * The reply is re-posted as history on the next turn, so nothing over the cap may
+   * reach the page — that is what this holds, and it is the property worth pinning.
+   *
+   * It used to hold by refusing: an over-long reply was `ok: false`, the route 502'd,
+   * and the learner saw "The reply came back unusable. Please try again." over prose
+   * that read perfectly well — while the reply they never saw would have 400'd their
+   * *next* question as history had it been kept. Clipping keeps the cap and keeps the
+   * answer, and the marker means a truncated reply does not read as a whole one.
    */
-  it('refuses a reply that would break the next request', () => {
+  it('clips a reply that would break the next request', () => {
     const result = parseTutorReply({ reply: 'x'.repeat(MAX_REPLY_CHARS + 1) });
-    expect(result.ok).toBe(false);
-    expect(result.ok === false && result.issues.map((i) => i.path)).toContain('reply');
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.value.reply).toHaveLength(MAX_REPLY_CHARS);
+    expect(result.value.reply.endsWith('…')).toBe(true);
+    expect(result.value.reply.startsWith('x')).toBe(true);
+  });
+
+  it('leaves a reply exactly at the cap alone, marker and all', () => {
+    const atCap = 'x'.repeat(MAX_REPLY_CHARS);
+    expect(parseTutorReply({ reply: atCap })).toEqual({ ok: true, value: { reply: atCap } });
   });
 });
 

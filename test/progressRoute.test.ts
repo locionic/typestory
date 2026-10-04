@@ -30,6 +30,7 @@ const stats = (over: Partial<UserStats> = {}): UserStats => ({
   bestWpm: 62,
   averageWpm: 62,
   averageAccuracy: 98,
+  bestAccuracy: 98,
   ...over,
 });
 

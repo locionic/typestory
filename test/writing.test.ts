@@ -4,6 +4,9 @@ import {
   CORRECTION_SYSTEM_PROMPT,
   MAX_CORRECTED_CHARS,
   MAX_IMPROVEMENTS,
+  MAX_NOTE_CHARS,
+  MAX_SPAN_CHARS,
+  MAX_SUMMARY_CHARS,
   MAX_TEXT_CHARS,
   MIN_TEXT_CHARS,
   buildCorrectionRequest,
@@ -130,6 +133,53 @@ describe('parseCorrectionReport', () => {
     expect(parseCorrectionReport(report({ corrected: '' })).ok).toBe(false);
   });
 
+  /**
+   * Blank is blank, whichever side of the wire it arrives on.
+   *
+   * The request validator already measures on the trimmed text, and has a test named
+   * for it — "so padding cannot sneak past" — because a box holding only whitespace is
+   * as empty as an empty one. The report validator checked `.length === 0` instead, so
+   * three spaces satisfied it: a blank summary rendered as an empty "What to work on"
+   * card, and a blank note rendered as an empty chip beside the strikethrough.
+   *
+   * It costs more than a blank card, because the report is all-or-nothing — the route
+   * rejects the whole body if any one field fails. A blank note on the seventh of eight
+   * improvements throws away a valid summary, a valid rewrite and seven valid notes,
+   * and the learner is told "The correction came back unusable. Please try again."
+   * over output that was otherwise complete. `parseTutorReply` has always trimmed here.
+   */
+  it('refuses a field that is only whitespace, in any position', () => {
+    // Top level: the summary and the rewrite the page renders as cards.
+    expect(parseCorrectionReport(report({ summary: '   ' })).ok).toBe(false);
+    expect(parseCorrectionReport(report({ corrected: '\n\t ' })).ok).toBe(false);
+
+    // Inside an improvement, where the page renders three chips per entry.
+    for (const key of ['original', 'corrected', 'note'] as const) {
+      const result = parseCorrectionReport(
+        report({ improvements: [{ original: 'I go', corrected: 'I went', note: 'tense', [key]: '  ' }] }),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.issues.map((i) => i.path)).toContain(
+        `improvements[0].${key}`,
+      );
+    }
+  });
+
+  /**
+   * The guard on the guard: trimming must not start rejecting real prose, including
+   * text that legitimately begins or ends in a space.
+   */
+  it('keeps a genuinely complete report intact', () => {
+    const result = parseCorrectionReport(
+      report({
+        summary: ' Watch the articles. ',
+        corrected: 'I went to the market.\n\nShe bought vegetables.',
+        improvements: [{ original: ' I go', corrected: ' I went', note: 'past simple' }],
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it('refuses an improvements field that is not an array', () => {
     expect(parseCorrectionReport(report({ improvements: 'none' })).ok).toBe(false);
   });
@@ -142,7 +192,87 @@ describe('parseCorrectionReport', () => {
     expect(result.ok === false && result.issues.map((i) => i.path)).toContain('improvements[0].note');
   });
 
-  it('refuses more improvements than the cap allows', () => {
+  /**
+   * Over-long model output is clipped, not rejected — the same rule as the blank check
+   * above, and the reason the two are different: a blank field has nothing to say, an
+   * over-long one has a great deal. The parser used to treat them alike, which made one
+   * verbose note throw away a good summary, a good rewrite and every other note, after
+   * the learner had already waited out the model call.
+   *
+   * These four pin the property that actually protects the page — nothing longer than
+   * its cap reaches a rendered chip or card — without pinning which of them the
+   * prompt is told about, which is the prompt's own test's job.
+   */
+  it('clips every over-long field to its cap, and keeps the report', () => {
+    const result = parseCorrectionReport(
+      report({
+        summary: 's'.repeat(MAX_SUMMARY_CHARS + 1),
+        corrected: 'c'.repeat(MAX_CORRECTED_CHARS + 1),
+        improvements: [
+          {
+            original: 'o'.repeat(MAX_SPAN_CHARS + 1),
+            corrected: 'c'.repeat(MAX_SPAN_CHARS + 1),
+            note: 'n'.repeat(MAX_NOTE_CHARS + 1),
+          },
+        ],
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    const [first] = result.value.improvements;
+    expect(result.value.summary).toHaveLength(MAX_SUMMARY_CHARS);
+    expect(result.value.corrected).toHaveLength(MAX_CORRECTED_CHARS);
+    expect(first.original).toHaveLength(MAX_SPAN_CHARS);
+    expect(first.corrected).toHaveLength(MAX_SPAN_CHARS);
+    expect(first.note).toHaveLength(MAX_NOTE_CHARS);
+  });
+
+  /**
+   * The marker is why the clip is safe: a silently sliced span reads as the whole span,
+   * so the learner would be told their change was the first 299 characters of something
+   * longer. A clip with no marker would satisfy every assertion above and be the same
+   * defect the cap was introduced to prevent.
+   */
+  it('marks a clipped field, so a partial one cannot read as a whole one', () => {
+    const result = parseCorrectionReport(
+      report({ improvements: [{ original: 'a', corrected: 'b', note: 'x'.repeat(MAX_NOTE_CHARS) }] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.value.improvements[0].note.endsWith('…')).toBe(false);
+
+    const over = parseCorrectionReport(
+      report({
+        improvements: [{ original: 'a', corrected: 'b', note: 'x'.repeat(MAX_NOTE_CHARS + 1) }],
+      }),
+    );
+    if (!over.ok) throw new Error('unreachable');
+    expect(over.value.improvements[0].note.endsWith('…')).toBe(true);
+  });
+
+  it('leaves fields exactly at their cap untouched', () => {
+    const atCap = report({
+      summary: 's'.repeat(MAX_SUMMARY_CHARS),
+      corrected: 'c'.repeat(MAX_CORRECTED_CHARS),
+      improvements: [
+        {
+          original: 'o'.repeat(MAX_SPAN_CHARS),
+          corrected: 'c'.repeat(MAX_SPAN_CHARS),
+          note: 'n'.repeat(MAX_NOTE_CHARS),
+        },
+      ],
+    });
+    const result = parseCorrectionReport(atCap);
+    expect(result).toEqual({ ok: true, value: atCap });
+  });
+
+  /**
+   * Too many entries is sliced rather than rejected, for the same reason, and because
+   * the page now reads "Changes (N)" rather than "Every change (N)" — see that header.
+   * Every entry is still validated first, so a malformed ninth one is still a failure.
+   */
+  it('slices to the cap instead of discarding the report', () => {
     const many = {
       ...report(),
       improvements: Array.from({ length: MAX_IMPROVEMENTS + 1 }, (_, i) => ({
@@ -151,17 +281,29 @@ describe('parseCorrectionReport', () => {
         note: 'n',
       })),
     };
+    const result = parseCorrectionReport(many);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.value.improvements).toHaveLength(MAX_IMPROVEMENTS);
+    // The last entry kept, not the first MAX_IMPROVEMENTS of a longer list.
+    expect(result.value.improvements[MAX_IMPROVEMENTS - 1].original).toBe(
+      `a${MAX_IMPROVEMENTS - 1}`,
+    );
+  });
+
+  it('still rejects a malformed entry past the cap, rather than slicing it away', () => {
+    const many = {
+      ...report(),
+      improvements: [
+        ...Array.from({ length: MAX_IMPROVEMENTS }, (_, i) => ({
+          original: `a${i}`,
+          corrected: `b${i}`,
+          note: 'n',
+        })),
+        { original: 'a', corrected: 'b' },
+      ],
+    };
     expect(parseCorrectionReport(many).ok).toBe(false);
-  });
-
-  it('refuses a corrected text longer than the cap', () => {
-    const over = report({ corrected: 'x'.repeat(MAX_CORRECTED_CHARS + 1) });
-    expect(parseCorrectionReport(over).ok).toBe(false);
-  });
-
-  it('refuses an improvement whose note runs away', () => {
-    const long = report({ improvements: [{ original: 'a', corrected: 'b', note: 'x'.repeat(400) }] });
-    expect(parseCorrectionReport(long).ok).toBe(false);
   });
 });
 
@@ -199,5 +341,51 @@ describe('the improvements ceiling is communicated, not just enforced', () => {
 
     expect(stated).toBeDefined();
     expect(Number(stated)).toBeLessThanOrEqual(MAX_IMPROVEMENTS);
+  });
+});
+
+describe('every other model-output cap is communicated too', () => {
+  /**
+   * The test above covers the one cap the learner can drive over on their own, and the
+   * four here were the ones it missed. Same amplifier in every case: nothing downstream
+   * reads a field past its cap without either losing the field or trimming it.
+   *
+   * MAX_CORRECTED_CHARS is the one that actually bites, and it is arithmetic rather than
+   * speculation: `MAX_TEXT_CHARS` is 4000, the prompt tells the model not to shorten what
+   * was written, and 6000 is the ceiling — a factor of 1.5 between submitting a legal
+   * essay and a corrected version that has had its tail cut off.
+   *
+   * These four are interpolated from the constants rather than typed beside them, so
+   * the number the model is given and the number the parser enforces are the same
+   * number and cannot drift.
+   *
+   * The second test below is the one that was missing. This paragraph used to tell the
+   * model that going over any limit "costs the whole report — the summary, the rewrite
+   * and every note", which stopped being true when `clip` replaced the rejection, and
+   * nothing noticed because nothing asserted the claim itself. It matters more than a
+   * stale sentence: an empty `improvements` array is the one answer the page renders as
+   * "Nothing needed changing. That text was already correct.", so a model told that
+   * trimming is catastrophic has a reason to return nothing at all rather than risk a
+   * long note.
+   */
+  const statedCeilings = () =>
+    CORRECTION_SYSTEM_PROMPT.split('\n\n').find((p) => p.startsWith('Length limits')) ?? '';
+
+  it('names all four, in a paragraph of its own', () => {
+    const stated = statedCeilings();
+
+    // Empty means the paragraph was deleted, and every assertion below would then pass
+    // for a prompt that tells the model nothing at all.
+    expect(stated).not.toBe('');
+    for (const cap of [MAX_SUMMARY_CHARS, MAX_CORRECTED_CHARS, MAX_SPAN_CHARS, MAX_NOTE_CHARS]) {
+      expect(stated).toContain(String(cap));
+    }
+  });
+
+  it('describes the consequence the parser actually has', () => {
+    const stated = statedCeilings();
+
+    expect(stated).toMatch(/trimmed/i);
+    expect(stated).not.toMatch(/costs the whole|whole report/i);
   });
 });

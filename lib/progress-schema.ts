@@ -171,7 +171,6 @@ function parseStreak(raw: unknown, path: string, issues: ValidationIssue[]): Use
   };
 }
 
-
 function parseStats(raw: unknown, issues: ValidationIssue[]): UserStats | null {
   if (!isObject(raw)) {
     push(issues, 'stats', 'expected an object');
@@ -205,6 +204,16 @@ function parseStats(raw: unknown, issues: ValidationIssue[]): UserStats | null {
   if (!isPercent(raw.averageAccuracy)) {
     push(issues, 'stats.averageAccuracy', 'expected a number between 0 and 100');
   }
+  // Deliberately the only numeric field here that pushes no issue when it is missing.
+  // `bestAccuracy` was added after records were already on disk, and this parse is
+  // all-or-nothing: push an issue for a field that is merely absent and every backup the
+  // previous build wrote is refused wholesale, which is the exact failure this file's own
+  // comments describe — a valid local history and a push that has silently stopped. An
+  // absent field is recovered from the sessions above instead, the same derivation the
+  // client makes, so both ends agree on what an old record meant.
+  const bestAccuracy = isPercent(raw.bestAccuracy)
+    ? raw.bestAccuracy
+    : sessions.reduce((best, session) => Math.max(best, session.accuracy), 0);
 
   // Every check above has run, so the remaining issue is a one-line report for a
   // payload with two problems. An invalid streak already pushed its own issue.
@@ -218,6 +227,7 @@ function parseStats(raw: unknown, issues: ValidationIssue[]): UserStats | null {
     bestWpm: raw.bestWpm as number,
     averageWpm: raw.averageWpm as number,
     averageAccuracy: raw.averageAccuracy as number,
+    bestAccuracy,
   };
 }
 

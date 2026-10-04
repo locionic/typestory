@@ -4,6 +4,35 @@ import { BookOpen, Sparkles, ArrowRight, Zap, Code } from 'lucide-react';
 import TypingEngine from '../components/typing/TypingEngine';
 import { STORIES } from '../data/stories';
 import { VOCAB_BANKS } from '../data/vocab';
+import { StoryItem } from '../lib/types';
+import { LANDING_PASSAGE } from '../lib/landing';
+
+/**
+ * The three cards the landing page shows, chosen by genre rather than by position.
+ *
+ * It was `STORIES.slice(0, 3)`, under a heading reading "Type Along With Real Stories"
+ * and a line promising "rich, contextual English literature". The corpus is authored in
+ * blocks rather than by genre — its first four entries are all technical interview Q&A —
+ * so the slice returned three developer modules and no literature at all. The fable, both
+ * classics and the dialogue were all below the cut, so a learner who never clicked "View
+ * all stories" saw the product describe itself as what three of its eleven stories happen
+ * to be: three "Level B2" cards under bylines that are series names, not authors.
+ *
+ * A slice of a list ordered by nothing in particular is a claim about the corpus that
+ * holds only until the next story is authored. Naming the genres survives that, and picks
+ * up a replacement on its own if a genre loses its only story: `find` then returns
+ * nothing, the entry drops out, and the page shows two cards rather than a crash or a lie.
+ *
+ * Fable, classic, then tech — one of each, and one per grid column. The order is the
+ * landing page's, and `FEATURED_CATEGORIES` is the only place it lives.
+ */
+export const FEATURED_CATEGORIES = ['fable', 'classic', 'tech'] as const;
+
+export function featuredStories(stories: StoryItem[]): StoryItem[] {
+  return FEATURED_CATEGORIES.map((category) =>
+    stories.find((story) => story.category === category),
+  ).filter((story): story is StoryItem => story !== undefined);
+}
 
 export default function HomePage() {
   return (
@@ -24,7 +53,7 @@ export default function HomePage() {
 
       {/* Live Interactive Typing Arena */}
       <div className="mb-16">
-        <TypingEngine />
+        <TypingEngine passage={{ ...LANDING_PASSAGE, sourceType: 'story' }} />
       </div>
 
       {/* Featured Stories Grid */}
@@ -47,7 +76,7 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {STORIES.slice(0, 3).map((story) => (
+          {featuredStories(STORIES).map((story) => (
             <Link
               key={story.slug}
               href={`/stories/${story.slug}`}
@@ -63,7 +92,10 @@ export default function HomePage() {
                 <h3 className="text-lg font-bold text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-400">
                   {story.title}
                 </h3>
-                <p className="mt-1 text-xs text-gray-400">By {story.author}</p>
+                <p className="mt-1 text-xs text-gray-400">
+                  {story.authorIsPerson && 'By '}
+                  {story.author}
+                </p>
                 <p className="mt-2.5 text-xs leading-relaxed text-gray-600 dark:text-gray-300 line-clamp-3">
                   {story.summary}
                 </p>
@@ -99,11 +131,27 @@ export default function HomePage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+        {/* Two columns, for four banks. This was `sm:grid-cols-3`, which fits three.
+           * An odd card count in a grid orphans one and that is unavoidable; four in three
+           * orphans one at every width from `sm` up, so no breakpoint had a full row.
+           * 2×2 divides at every one. Not `lg:grid-cols-4` instead: four across a 6xl
+           * container is under 260px each, too narrow for a title, a badge and a
+           * two-line description.
+           */}
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           {VOCAB_BANKS.map((bank) => (
+            /* Named in the link, not just the card.
+             *
+             * All four pointed at a bare `/vocab`, which opens whatever bank happens to
+             * be first. Clicking the card that says "IELTS Academic Vocabulary" and
+             * "5 core words" landed on Full-Stack terminology, with nothing on screen
+             * saying the click had been discarded — the card read as a link to that
+             * bank and was not one. The section header above is the one real way in;
+             * these are the other way, and they have to know where they are going.
+             */
             <Link
               key={bank.slug}
-              href="/vocab"
+              href={`/vocab?bank=${bank.slug}`}
               className="flex flex-col justify-between rounded-3xl border border-gray-200 bg-white p-6 transition-all hover:border-indigo-300 hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
             >
               <div>
@@ -173,7 +221,7 @@ export default function HomePage() {
               What kind of technical interview questions and answers are included?
             </h3>
             <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              We provide real-world software engineering interview Q&amp;A modules covering Full-Stack architecture, Next.js 15 App Router, RAG pipelines, dense vector retrieval, Azure cloud PaaS, Docker networking, and CI/CD automation workflows.
+              We provide real-world software engineering interview Q&amp;A modules covering Full-Stack architecture, Next.js 16 App Router, RAG pipelines, dense vector retrieval, Azure cloud PaaS, Docker networking, and CI/CD automation workflows.
             </p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">

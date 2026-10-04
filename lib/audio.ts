@@ -12,7 +12,34 @@ class SoundEngine {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
-        this.ctx = new AudioCtx();
+        /* Constructing is the one step that can fail before any of the callers' own guards.
+         *
+         * A browser with no usable audio device throws `NotSupportedError` right here, and
+         * both entry points call this *before* the `try` that wraps their graph — so the one
+         * failure the surrounding `catch` blocks were written for, a browser that refuses to
+         * make sound, was the one failure they could not reach.
+         *
+         * What escaped was not silence. `store/useTypingStore.ts` calls `playKeyClick` from
+         * `handleKeyInput` with no guard of its own, so the exception unwound out of a
+         * keystroke before the character it was for was compared and recorded: the key did
+         * nothing. It threw again on the next one, so the board was dead for the rest of the
+         * session while still looking live, and a run that recorded nothing.
+         *
+         * Guarded here rather than at either call site because this is the only place the
+         * construction happens, and a sound that cannot play is never worth an exception —
+         * `handleKeyInput` is the typing path, and nothing on it is optional.
+         *
+         * Nothing is cached on failure, so the next keystroke asks again. A browser that
+         * refuses once may stop refusing — an extension unloaded, a device attached, a
+         * permission granted — and a latched "broken" flag would be a machine that went
+         * permanently quiet on the keystroke that happened to be unlucky. Same reasoning as
+         * the `resume()` catch below, which also leaves the context in place to be retried.
+         */
+        try {
+          this.ctx = new AudioCtx();
+        } catch {
+          return null;
+        }
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
@@ -76,6 +103,12 @@ class SoundEngine {
   }
 
   public playSuccessChime() {
+    // The same guard `playKeyClick` carries, and for the same reason. The selector says
+    // "Mute" and nothing else, so it promises silence rather than quiet keys, and the
+    // case the setting exists for — a library, a train — is exactly the one where a
+    // four-note arpeggio on the last keystroke is a problem. Nothing is lost by honouring
+    // it: finishing a passage already puts a card on screen with the WPM, accuracy and time.
+    if (this.soundType === 'mute') return;
     const ctx = this.getContext();
     if (!ctx) return;
 

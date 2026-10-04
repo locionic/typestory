@@ -1,7 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { STORIES } from '../data/stories';
 import { normalizeTypableText, useTypingStore } from '../store/useTypingStore';
 
 const state = () => useTypingStore.getState();
+
+/**
+ * The store's opening passage, captured at import.
+ *
+ * Nothing else in this file can see it: every case below calls `loadCustomText` first,
+ * so the only surface that ever reads these three values is the landing page's typing
+ * board — and `beforeEach` has already overwritten them by the time a test body runs.
+ */
+const OPENING = (({ title, sourceType, targetText }) => ({ title, sourceType, targetText }))(
+  useTypingStore.getState(),
+);
 const type = (text: string) => {
   for (const ch of text) state().handleKeyInput(ch);
 };
@@ -54,6 +66,40 @@ describe('source provenance', () => {
     state().loadCustomText('pasted text');
     expect(state().sourceType).toBe('custom');
   });
+
+  /**
+   * The landing page's passage is recorded exactly like a story's is.
+   *
+   * Whoever arrives at `/` gets a typing board already loaded, and finishing it writes a
+   * session through the same `recordCompletedSession` every other finish goes through.
+   * So the three values in the store's initial state are not decoration — they are the
+   * title and the source badge a first-time learner's very first history row will carry,
+   * and they get pushed to the backup with it.
+   *
+   * They described a story that does not exist. `title` was "Full-Stack Architecture:
+   * Interview Q&A" beside a `sourceType: 'story'`, but the nearest real story is "Full-Stack
+   * & Next.js: Technical Interview Q&A" and the passage itself — a Q&A about the "core
+   * pillars" of full-stack architecture — appears in none of them. The badge said a
+   * library item the learner had practised; the catalog has no such item, the passage is
+   * not findable anywhere in the app afterwards, and the row is permanent because
+   * nothing recomputes history.
+   *
+   * The fix is not to relabel it "custom" either: `/custom` passes its own title and
+   * `sourceType` explicitly, and the claim on screen is a claim about where the words came
+   * from, not about who owns them. Naming a real story and typing one of its paragraphs
+   * makes every part of the row true, and makes the landing board behave like the real
+   * thing — which is what the badge already claims.
+   *
+   * Asserted against `STORIES` rather than as a literal pair, so renaming a story or
+   * re-editing its paragraph fails here instead of quietly resurrecting the fiction.
+   */
+  it('opens on a paragraph of the story it names', () => {
+    const story = STORIES.find((s) => s.title === OPENING.title);
+
+    expect(story, `no story is titled ${JSON.stringify(OPENING.title)}`).toBeDefined();
+    expect(OPENING.sourceType).toBe('story');
+    expect(story!.paragraphs).toContain(OPENING.targetText);
+  });
 });
 
 describe('normalizeTypableText', () => {
@@ -104,7 +150,6 @@ describe('normalizeTypableText', () => {
     ['zero-width joiner', 'a‍b', 'ab'],
     ['left-to-right mark', 'a‎b', 'ab'],
     ['right-to-left override', 'a‮b', 'ab'],
-    ['byte-order mark', 'a﻿b', 'ab'],
     ['soft hyphen', 'a­b', 'ab'],
     ['word joiner', 'a⁠b', 'ab'],
   ])('strips the invisible %s rather than parking the caret on it', (_l, input, expected) => {
@@ -123,6 +168,7 @@ describe('normalizeTypableText', () => {
     ['ideographic space', 'a　b', 'a b'],
     ['hair space', 'a b', 'a b'],
     ['ogham space', 'a b', 'a b'],
+    ['byte-order mark', 'a\uFEFFb', 'a b'],
     ['line separator', 'a b', 'a b'],
     ['paragraph separator', 'a b', 'a b'],
   ])('spaces the %s, because it does separate two words', (_l, input, expected) => {
@@ -160,6 +206,40 @@ describe('session recording guard', () => {
 
     // A fresh TypingEngine mounts on the next page and reads the same store.
     expect(state().isCompleted).toBe(true);
+    expect(state().hasRecordedSession).toBe(true);
+
+    // And the claim is refused, which is the half that actually stops a re-record.
+    // The flag being true is not the protection on its own: the component used to
+    // read the flag from the value its render captured, which is a different thing
+    // from the value in the store.
+    expect(state().markSessionRecorded()).toBe(false);
+  });
+
+  /**
+   * The check and the write were in two places, so neither could see the other.
+   *
+   * TypingEngine read `hasRecordedSession` from the value its render captured, then
+   * called `markSessionRecorded()` to set it. Between those two lines the render had
+   * not changed, so anything running the same effect again from the same closure read
+   * the stale `false` and recorded a second time.
+   *
+   * React 19 in development runs that effect twice — StrictMode's double-invoke — and
+   * does both invocations before re-rendering, which is exactly the window. A learner
+   * running `next dev` finished one passage and got two sessions: count, word volume,
+   * time spent and both averages all inflated. Production React ships no StrictMode, so
+   * this never reached a learner, but the guard is now correct in both.
+   *
+   * The claim lives in the store because that is the only place that can be atomic
+   * here. A `useRef` would fix the double-invoke and reintroduce the remount bug the
+   * regression above documents, because a ref re-arms on every mount; the store does
+   * not, so it cannot.
+   */
+  it('lets exactly one caller claim a run, even with no re-render between calls', () => {
+    type('abc');
+
+    // No re-render in between — which is what makes this the case that used to fail.
+    expect(state().markSessionRecorded()).toBe(true);
+    expect(state().markSessionRecorded()).toBe(false);
     expect(state().hasRecordedSession).toBe(true);
   });
 
@@ -210,6 +290,51 @@ describe('keystroke accounting', () => {
     expect(state().totalKeystrokes).toBe(2);
     expect(state().incorrectKeystrokes).toBe(1);
   });
+
+  /**
+   * A finished run, whose numbers cannot still be moving.
+   *
+   * Not a bug report: `handleKeyInput` opens with `if (state.isCompleted) return`, so
+   * this already holds. It is pinned because the guard is the whole of what "finished"
+   * means for the counters, and it is easy to lose. Moving that check below the
+   * accounting — where the empty-target check sits, two lines down, and looks like the
+   * more natural place for a precondition — would let the board keep accepting keys after
+   * the card had reported a result.
+   *
+   * The failure mode is specific. Past the end of the passage `targetText[typedText.length]`
+   * is `undefined`, so every further key is `undefined !== char` and lands in
+   * `incorrectKeystrokes`; `endTime` is re-stamped to `now`, so the duration grows while
+   * the correct count stands still. `handleBackspace` has refused to touch a finished run
+   * all along, so keys could be added but never taken back.
+   *
+   * Moved into `completion > freezes input after completion`, which already pinned
+   * `typedText` and `totalKeystrokes`; only `endTime` is new here.
+   */
+  it('counts nothing further once the passage is finished', () => {
+    type('abc');
+    const finished = state();
+
+    type('xyz');
+
+    const after = state();
+    expect(after.isCompleted).toBe(true);
+    expect(after.correctKeystrokes).toBe(finished.correctKeystrokes);
+    expect(after.incorrectKeystrokes).toBe(finished.incorrectKeystrokes);
+  });
+
+  /**
+   * The control, and the reason the test above is not vacuous: the counters really do
+   * move on a run in progress. `'ax'` on a passage of `'abc'` is one key right and one
+   * wrong — which is also why a passing version of this that typed `'ab'` would have
+   * asserted the wrong thing about a matching prefix.
+   */
+  it('still counts every keystroke of a run in progress', () => {
+    type('ax');
+    expect(state().totalKeystrokes).toBe(2);
+    expect(state().correctKeystrokes).toBe(1);
+    expect(state().incorrectKeystrokes).toBe(1);
+    expect(state().isCompleted).toBe(false);
+  });
 });
 
 describe('backspace', () => {
@@ -242,10 +367,15 @@ describe('completion', () => {
 
   it('freezes input after completion', () => {
     type('abc');
+    const finished = state();
     type('xyz');
 
     expect(state().typedText).toBe('abc');
     expect(state().totalKeystrokes).toBe(3);
+    // The clock the completion card's WPM divides by, so a later stamp here is a
+    // longer run than the one already recorded. The guard above `handleKeyInput`'s
+    // accounting is what stops it — moving it below the `set` breaks this.
+    expect(state().endTime).toBe(finished.endTime);
   });
 });
 
@@ -315,6 +445,33 @@ describe('preferences', () => {
     const reloaded = (await import('../store/useTypingStore')).useTypingStore;
     expect(reloaded.getState().switchSound).toBe('blue');
   });
+
+  /**
+   * The other half of what the reload above checks, and the half that was untested.
+   *
+   * `switchSound` is what the `<select>` shows; `soundEngine` is what is actually heard.
+   * They are separate pieces of state, and the module reaches both on purpose —
+   * `soundEngine.setSoundType(startingSound)` at evaluation time, above the store. So a
+   * persisted 'mute' can satisfy the dropdown and never reach the audio: the learner sees
+   * Mute selected and hears every keystroke of a run in a library. Removing that one line
+   * breaks the promise the dropdown makes and leaves every other assertion here green,
+   * because the store's own field would still read 'mute'.
+   *
+   * The engine has to be re-imported after `vi.resetModules()` rather than reached
+   * through a top-level import. It is a singleton, so the instance this file holds is the
+   * one `setSound` just wrote to — asserting that one would pass with the wiring deleted,
+   * and prove nothing.
+   */
+  it('reaches the audio engine on reload, not only the dropdown', async () => {
+    state().setSound('mute');
+    vi.resetModules();
+
+    const reloaded = (await import('../store/useTypingStore')).useTypingStore;
+    const engine = (await import('../lib/audio')).soundEngine;
+
+    expect(reloaded.getState().switchSound).toBe('mute');
+    expect(engine.getSoundType()).toBe('mute');
+  });
 });
 describe('the session clock', () => {
   // Regression: elapsedSeconds was component-local state that no reset touched, so
@@ -350,5 +507,63 @@ describe('the session clock', () => {
     expect(state().endTime).not.toBeNull();
     expect(state().startTime).not.toBeNull();
     expect(state().endTime! - state().startTime!).toBeLessThanOrEqual(1000);
+  });
+});
+
+/**
+ * A keystroke on a machine that cannot make a noise.
+ *
+ * `handleKeyInput` calls `soundEngine.playKeyClick` partway through, before the pressed
+ * character is compared and recorded, and nothing guarded it. A browser with no usable audio
+ * device throws `NotSupportedError` from the `AudioContext` constructor, so the exception
+ * unwound out of the keystroke and the character was never counted — then threw again on the
+ * next one, and the next, so the board looked live for the rest of the session and recorded
+ * nothing at all.
+ *
+ * Pinned on the keystroke rather than on `playKeyClick` not throwing, because the outcome is
+ * the thing worth keeping: a guard anywhere between the two satisfies this, and a fix that
+ * only silenced the engine's own exception path would not.
+ */
+describe('a browser with no audio device', () => {
+  /**
+   * Sound on, which is the state these two tests are about and not the state this file ends
+   * in. `describe('preferences')` above sets the switch to 'mute' on the shared
+   * `soundEngine` singleton and never puts it back, and `playKeyClick` returns at its first
+   * line when the sound is muted — so without this the audio path is never reached at all.
+   *
+   * That is not a hypothetical: it is why the first version of the test below passed against
+   * the unguarded constructor, having verified nothing. A test that cannot reach the code it
+   * names is worse than no test, because it is counted.
+   */
+  beforeEach(() => state().setSound('blue'));
+
+  afterEach(() => {
+    delete (window as unknown as { AudioContext?: unknown }).AudioContext;
+  });
+
+  it('records the keystroke anyway', () => {
+    (window as unknown as { AudioContext: unknown }).AudioContext = class {
+      constructor() {
+        throw new DOMException('No audio device available', 'NotSupportedError');
+      }
+    };
+
+    type('abc');
+
+    expect(state().typedText).toBe('abc');
+    expect(state().totalKeystrokes).toBe(3);
+  });
+
+  /**
+   * The control, and the reason the one above is not vacuous: a store that dropped keystrokes
+   * for any reason at all would satisfy it. Same three keys, no audio failure installed, and
+   * they land — so what the test above isolates is the audio, not the typing.
+   */
+  it('records the same keystrokes with audio available', () => {
+    (window as unknown as { AudioContext: unknown }).AudioContext = class {};
+
+    type('abc');
+
+    expect(state().typedText).toBe('abc');
   });
 });

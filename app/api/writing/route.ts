@@ -1,4 +1,4 @@
-import { AiRefusalError, createModelClient, isAiConfigured } from '../../../lib/ai';
+import { aiFailureCode, createModelClient } from '../../../lib/ai';
 import {
   CORRECTION_SCHEMA,
   MAX_TEXT_CHARS,
@@ -13,16 +13,16 @@ import {
  *
  *   GET  /api/writing              -> 200 { minTextChars, maxTextChars }
  *   POST /api/writing { text }     -> 200 { report }
- *                                      400 | 415 | 502 | 503
+ *                                      400 | 415 | 502
  *
  * The caps travel in the GET body rather than being imported by the page:
  * `MAX_TEXT_CHARS` lives beside the system prompt, and a value import would pull
  * the whole module — prompt included — into the browser bundle. The page takes
  * the *type* it needs with `import type`, which the compiler erases.
  *
- * TypeStory is client-side-first and free, so an unconfigured ANTHROPIC_API_KEY
- * is reported as a plain 503 the page can explain — never a 500, and never a gate
- * on anything else in the app.
+ * TypeStory is client-side-first and free, so a feature that cannot reach the model
+ * is reported as a code the page can explain — never a 500, and never a gate on
+ * anything else in the app.
  */
 
 const json = (body: unknown, status: number) =>
@@ -53,10 +53,6 @@ export async function POST(request: Request) {
     return json({ error: 'invalid_payload', issues: parsed.issues }, 400);
   }
 
-  if (!isAiConfigured()) {
-    return json({ error: 'ai_not_configured' }, 503);
-  }
-
   try {
     const client = createModelClient();
     const output = await client.generate({
@@ -77,6 +73,6 @@ export async function POST(request: Request) {
     // Log server-side so the failure is not silent; the client gets a code, never
     // the message, which would carry request detail.
     console.error('[writing] correction failed:', error);
-    return json({ error: error instanceof AiRefusalError ? 'ai_refusal' : 'ai_unavailable' }, 502);
+    return json({ error: aiFailureCode(error) }, 502);
   }
 }

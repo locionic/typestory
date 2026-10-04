@@ -1,20 +1,37 @@
 import { StoryItem } from '../lib/types';
 
-const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
+/**
+ * How fast a learner reads these stories, for the "~N min" on the catalog card and the
+ * story page.
+ *
+ * The one number here that is a fact about people rather than about the text, so it is
+ * named, isolated and worth retuning: 120 words a minute is the middle of the usual
+ * 100-150 band for graded EFL material, and this corpus is graded B1-C1 with heavy
+ * technical vocabulary, which sits at the slow end of ordinary prose. Raise it to
+ * claim less time, lower it to claim more.
+ *
+ * Rounded to whole minutes because that is what the cards show, and floored at one
+ * because a short story is still a story somebody has to sit down with.
+ */
+// ponytail: a reading-speed constant, not a measurement. Retune the band above if the
+// label ever needs to agree with how long the stories actually take to read.
+const READING_WORDS_PER_MINUTE = 120;
+
+const RAW_STORIES: Omit<StoryItem, 'wordCount' | 'isQA' | 'qaCount' | 'readingTimeMinutes'>[] = [
   {
     id: 'tech-story-1',
     slug: 'modern-full-stack-web-architecture',
     title: 'Full-Stack & Next.js: Technical Interview Q&A',
     author: 'Full-Stack Interview Series',
+    authorIsPerson: false,
     category: 'tech',
     level: 'B2',
     difficultyLabel: 'Full-Stack Q&A',
     summary:
-      'Master technical interview questions and answers on Next.js 15 App Router, React Server Components, TypeScript type safety, and clean API design.',
-    readingTimeMinutes: 2,
+      'Master technical interview questions and answers on Next.js 16 App Router, React Server Components, TypeScript type safety, and clean API design.',
     coverEmoji: '⚡',
     paragraphs: [
-      'Q: What is the main architectural benefit of React Server Components in Next.js 15? A: React Server Components execute exclusively on the server, significantly reducing client JavaScript bundle size and enabling secure, direct database access without exposing internal credentials.',
+      'Q: What is the main architectural benefit of React Server Components in Next.js 16? A: React Server Components execute exclusively on the server, significantly reducing client JavaScript bundle size and enabling secure, direct database access without exposing internal credentials.',
       'Q: How does Next.js App Router implement streaming and progressive rendering? A: Next.js utilizes React Suspense boundaries combined with HTTP chunked transfer encoding to deliver instant shell markup while asynchronously streaming resolved data token-by-token.',
       'Q: Why is schema validation with Zod recommended for TypeScript backend handlers? A: Zod parses and validates incoming runtime HTTP payloads against defined schemas, bridging the gap between static TypeScript types and untrusted client inputs to prevent unexpected runtime crashes.',
       'Q: How does the Result pattern improve backend error handling compared to throw statements? A: The Result pattern models success and failure as explicit return values, forcing callers to handle potential errors at compile time and preventing unhandled promise rejections.',
@@ -22,18 +39,18 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     ],
     keyVocabulary: [
       {
-        word: 'serverless',
-        phonetic: '/ˈsɝː.vɚ.ləs/',
-        pos: 'adj',
-        definition: 'A cloud computing model where the cloud provider dynamically manages the allocation of machine resources.',
-        translation: 'không máy chủ (kiến trúc serverless)',
+        word: 'streaming',
+        phonetic: '/ˈstriː.mɪŋ/',
+        pos: 'noun',
+        definition: 'Delivering a page in pieces as they become ready, so the first content appears before the whole response has arrived.',
+        translation: 'truyền dữ liệu theo luồng',
       },
       {
-        word: 'architecture',
-        phonetic: '/ˈɑːr.kə.tek.tʃɚ/',
+        word: 'schema',
+        phonetic: '/ˈskiː.mə/',
         pos: 'noun',
-        definition: 'The fundamental structure of a software system, its components, and their relationships.',
-        translation: 'kiến trúc phần mềm',
+        definition: 'The defined shape and structure of data, used to check that incoming values match what a program expects.',
+        translation: 'lược đồ, cấu trúc dữ liệu',
       },
       {
         word: 'validation',
@@ -56,12 +73,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'rag-ai-search-retrieval-engineering',
     title: 'RAG & AI Search Systems: Technical Interview Q&A',
     author: 'AI Engineering Series',
+    authorIsPerson: false,
     category: 'tech',
     level: 'C1',
     difficultyLabel: 'AI & RAG Q&A',
     summary:
       'Master technical interview questions and answers on Retrieval-Augmented Generation, document chunking, dense vector retrieval, and cross-encoder reranking.',
-    readingTimeMinutes: 2,
     coverEmoji: '🤖',
     paragraphs: [
       'Q: What is Retrieval-Augmented Generation and how does it prevent LLM hallucinations? A: RAG retrieves verifiable facts from an external knowledge base and injects them into the prompt, grounding language model responses in accurate context rather than parametric memory.',
@@ -107,12 +124,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'devops-automation-azure-ci-cd',
     title: 'Cloud Infrastructure & DevOps: Technical Interview Q&A',
     author: 'DevOps & Cloud Series',
+    authorIsPerson: false,
     category: 'tech',
     level: 'B2',
     difficultyLabel: 'DevOps & Cloud Q&A',
     summary:
       'Master technical interview questions and answers on GitHub Actions CI/CD pipelines, Docker networking, Playwright automation, and Terraform IaC.',
-    readingTimeMinutes: 2,
     coverEmoji: '☁️',
     paragraphs: [
       'Q: What core steps comprise an enterprise CI/CD pipeline in GitHub Actions? A: A robust pipeline triggers on pull requests, executing linting, static type checking, unit tests, container builds, and security scans before automatically deploying to staging.',
@@ -124,18 +141,18 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     ],
     keyVocabulary: [
       {
-        word: 'provisioning',
-        phonetic: '/prəˈvɪʒ.ən.ɪŋ/',
+        word: 'staging',
+        phonetic: '/ˈsteɪ.dʒɪŋ/',
         pos: 'noun',
-        definition: 'The process of setting up and preparing IT infrastructure resources for operational use.',
-        translation: 'cấp phát tài nguyên (provisioning)',
+        definition: 'An environment that mirrors production, where a release is verified before it goes live.',
+        translation: 'môi trường thử nghiệm (staging)',
       },
       {
-        word: 'regression',
-        phonetic: '/rɪˈɡreʃ.ən/',
+        word: 'drift',
+        phonetic: '/drɪft/',
         pos: 'noun',
-        definition: 'A software bug that causes a feature that was previously working to stop functioning.',
-        translation: 'lỗi hồi quy (regression bug)',
+        definition: 'The slow, unplanned divergence between a system’s actual configuration and the configuration it was defined to have.',
+        translation: 'trôi lệch cấu hình',
       },
       {
         word: 'declarative',
@@ -145,11 +162,11 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
         translation: 'mang tính khai báo (declarative)',
       },
       {
-        word: 'reproducible',
-        phonetic: '/ˌriː.prəˈduː.sə.bəl/',
-        pos: 'adj',
-        definition: 'Capable of being recreated or duplicated consistently with the same results.',
-        translation: 'có thể tái lập / tái hiện',
+        word: 'runner',
+        phonetic: '/ˈrʌn.ɚ/',
+        pos: 'noun',
+        definition: 'A machine that executes the steps of a CI pipeline, either hosted by the provider or by the team itself.',
+        translation: 'máy chạy (CI runner)',
       },
     ],
   },
@@ -158,12 +175,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'database-design-distributed-systems',
     title: 'Databases & Distributed Systems: Technical Interview Q&A',
     author: 'System Design Series',
+    authorIsPerson: false,
     category: 'tech',
     level: 'B2',
     difficultyLabel: 'System Design Q&A',
     summary:
       'Master technical interview questions and answers on relational versus NoSQL databases, inverted indices in Elasticsearch, cursor pagination, and Redis caching.',
-    readingTimeMinutes: 2,
     coverEmoji: '💾',
     paragraphs: [
       'Q: When should you select a relational database like MySQL over a document database? A: Choose relational databases when strict ACID transactional guarantees, foreign-key relationships, and normalized tables with complex multi-table joins are vital for data integrity.',
@@ -174,11 +191,11 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     ],
     keyVocabulary: [
       {
-        word: 'synchronization',
-        phonetic: '/ˌsɪŋ.krə.nəˈzeɪ.ʃən/',
+        word: 'latency',
+        phonetic: '/ˈleɪ.tən.si/',
         pos: 'noun',
-        definition: 'The coordination of events or data state to operate in unison across distributed systems.',
-        translation: 'sự đồng bộ hóa',
+        definition: 'The delay between sending a request and receiving the first byte of the response.',
+        translation: 'độ trễ',
       },
       {
         word: 'pagination',
@@ -195,11 +212,11 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
         translation: 'tách rời / giảm phụ thuộc',
       },
       {
-        word: 'indexing',
-        phonetic: '/ˈɪn.deks.ɪŋ/',
-        pos: 'noun',
-        definition: 'The process of creating specialized data structures on database columns to accelerate query lookups.',
-        translation: 'lập chỉ mục tìm kiếm',
+        word: 'inverted',
+        phonetic: '/ɪnˈvɝː.tɪd/',
+        pos: 'adj',
+        definition: 'Reversed: in a search index each word points to the list of documents containing it, rather than each document listing its words.',
+        translation: 'đảo ngược (chỉ mục đảo)',
       },
     ],
   },
@@ -208,12 +225,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'the-tortoise-and-the-hare',
     title: 'The Tortoise and the Hare',
     author: 'Aesop',
+    authorIsPerson: true,
     category: 'fable',
     level: 'A2',
     difficultyLabel: 'Beginner Friendly',
     summary:
       'The classic fable of humility and steady perseverance. A speedy hare ridicules a slow tortoise, challenging him to an unforgettable race.',
-    readingTimeMinutes: 2,
     coverEmoji: '🐢',
     paragraphs: [
       'A Hare was once making fun of the Tortoise for his slow and steady pace. "Do you ever get anywhere?" he asked with a mocking laugh.',
@@ -259,12 +276,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'the-gift-of-the-magi',
     title: 'The Gift of the Magi',
     author: 'O. Henry',
+    authorIsPerson: true,
     category: 'classic',
     level: 'B2',
     difficultyLabel: 'Intermediate',
     summary:
       'A timeless Christmas tale of selfless love. A young couple sacrifices their most prized possessions to buy secret gifts for one another.',
-    readingTimeMinutes: 3,
     coverEmoji: '🎁',
     paragraphs: [
       'One dollar and eighty-seven cents. That was all. And sixty cents of it was in pennies saved one and two at a time by bulldozing the grocer.',
@@ -311,12 +328,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'steve-jobs-stay-hungry-stay-foolish',
     title: 'Stay Hungry, Stay Foolish',
     author: 'Steve Jobs',
+    authorIsPerson: true,
     category: 'essay',
     level: 'B2',
     difficultyLabel: 'Inspirational Speech',
     summary:
       'Excerpts from Steve Jobs iconic 2005 Stanford commencement address on connecting the dots, loving what you do, and trusting your inner voice.',
-    readingTimeMinutes: 3,
     coverEmoji: '💡',
     paragraphs: [
       'You cannot connect the dots looking forward; you can only connect them looking backward. So you have to trust that the dots will somehow connect in your future.',
@@ -363,12 +380,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'the-birth-of-the-world-wide-web',
     title: 'How Tim Berners-Lee Built the Web',
     author: 'Tech History',
+    authorIsPerson: false,
     category: 'tech',
     level: 'B1',
     difficultyLabel: 'Technology & History',
     summary:
       'In 1989, a British scientist at CERN wrote a proposal that quietly changed human history forever: the World Wide Web.',
-    readingTimeMinutes: 2,
     coverEmoji: '🌐',
     paragraphs: [
       'In 1989, Sir Tim Berners-Lee was working as a software engineer at CERN, the European particle physics laboratory in Switzerland.',
@@ -414,12 +431,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'daily-coffee-shop-dialogue',
     title: 'Ordering at a Specialty Coffee Shop',
     author: 'Everyday Dialogues',
+    authorIsPerson: false,
     category: 'dialogue',
     level: 'A2',
     difficultyLabel: 'Daily Conversation',
     summary:
       'A realistic conversation between a customer and a barista in a busy artisanal coffee shop. Master everyday spoken English phrases.',
-    readingTimeMinutes: 2,
     coverEmoji: '☕',
     paragraphs: [
       'Barista: "Good morning! Welcome to Roasters Collective. What can I get started for you today?"',
@@ -466,12 +483,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'sherlock-holmes-the-red-headed-league',
     title: 'The Adventure of the Red-Headed League',
     author: 'Arthur Conan Doyle',
+    authorIsPerson: true,
     category: 'classic',
     level: 'B1',
     difficultyLabel: 'Intermediate Mystery',
     summary:
       'Sherlock Holmes investigates a bizarre London society offering lucrative pay to men with fiery red hair, unraveling an ingenious subterranean bank heist.',
-    readingTimeMinutes: 3,
     coverEmoji: '🕵️‍♂️',
     paragraphs: [
       'I had called upon my friend Mr. Sherlock Holmes one day in the autumn of last year and found him in deep conversation with a stout florid gentleman with fiery red hair.',
@@ -516,12 +533,12 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
     slug: 'the-first-computer-bug',
     title: 'The First Computer Bug',
     author: 'Grace Hopper & Computing History',
+    authorIsPerson: false,
     category: 'tech',
     level: 'B2',
     difficultyLabel: 'Tech History',
     summary:
       'On September 9, 1947, engineers testing the electro-mechanical Harvard Mark II found an actual moth stuck inside Relay 70, immortalizing the term "debugging".',
-    readingTimeMinutes: 2,
     coverEmoji: '🦋',
     paragraphs: [
       'In the sweltering heat of late summer 1947, computer scientists at Harvard University were diligently troubleshooting an unexpected glitch in the Mark II Aiken Relay Calculator.',
@@ -564,14 +581,46 @@ const RAW_STORIES: Omit<StoryItem, 'wordCount'>[] = [
 ];
 
 /**
- * Word counts are derived, never hand-written.
+ * Word counts, reading time and the Q&A flag are derived, never hand-written.
  *
  * Every one of the eleven hand-entered counts was wrong by 30-58%, which put the
  * catalog cards, the shortest/longest sort order and the JSON-LD all out of step
  * with the text the learner is actually asked to type. Editing a paragraph now
  * cannot desync them again.
+ *
+ * `readingTimeMinutes` was the third copy of that mistake and the only one still
+ * standing: eleven more hand-entered numbers, tracking nothing. Sorted by length the
+ * corpus read 2, 2, 2, 2, 3, 2, 2, 3, 2, 2, 3 minutes — the story page printed its
+ * derived word count and its invented time in one sentence, so "158 words • ~3 min"
+ * sat above a 182-word story reading "~2 min". Omitted from the raw type above, so
+ * hand-writing one again is a compile error rather than a silent contradiction.
+ *
+ * `isQA` is here for the same reason and a worse reason: it was read off
+ * `category === 'tech'` in five places, and two of the six tech stories are
+ * narrative essays. The category stays the "Tech & Engineering" browse filter, which
+ * it describes correctly; it was only ever wrong as an answer to a question about
+ * the text. `some` rather than `every`, so a story that is one drill among prose is
+ * still shown as what it mostly is rather than being flattened to "not a drill". The
+ * catalog's "N Q&A Questions" is the other question over the same paragraphs, so `qaCount`
+ * counts them under that same rule instead of assuming the corpus is uniform.
  */
-export const STORIES: StoryItem[] = RAW_STORIES.map((story) => ({
-  ...story,
-  wordCount: story.paragraphs.join(' ').trim().split(/\s+/).filter(Boolean).length,
-}));
+/**
+ * Whether one paragraph is an interview drill, stated once.
+ *
+ * The flag below and the count beside it are two different questions about the same
+ * paragraphs — `some` and `how many` — so they read the same rule rather than each
+ * spelling it out. Two copies inside one expression is how they came to disagree.
+ */
+const isQAParagraph = (text: string) => text.startsWith('Q:') && text.includes(' A:');
+
+export const STORIES: StoryItem[] = RAW_STORIES.map((story) => {
+  const wordCount = story.paragraphs.join(' ').trim().split(/\s+/).filter(Boolean).length;
+
+  return {
+    ...story,
+    wordCount,
+    isQA: story.paragraphs.some(isQAParagraph),
+    qaCount: story.paragraphs.filter(isQAParagraph).length,
+    readingTimeMinutes: Math.max(1, Math.round(wordCount / READING_WORDS_PER_MINUTE)),
+  };
+});

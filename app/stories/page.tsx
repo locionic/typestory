@@ -3,11 +3,23 @@ import type { Metadata } from 'next';
 import { BookOpen } from 'lucide-react';
 import { STORIES } from '../../data/stories';
 import StoriesCatalog from '../../components/stories/StoriesCatalog';
+import { pageMetadata } from '../../lib/site';
 
+/**
+ * Through `pageMetadata`, because a title on its own was not enough here and looked like it
+ * was: this page always set `title` and `description`, and still shipped the *homepage's*
+ * `og:title`, because a page that does not set `openGraph` inherits the root layout's whole
+ * object rather than falling back to its own title. The app's most-shared page, describing
+ * itself as the homepage. Checked in the build output on 2026-10-04.
+ *
+ * `keywords` stays hand-written and outside the helper — it is a search-only field with no
+ * OpenGraph or card equivalent, so there is nothing for `pageMetadata` to keep in step.
+ */
 export const metadata: Metadata = {
-  title: 'English Type-Along Stories: Practice Typing with Classic Literature & Fables',
-  description:
+  ...pageMetadata(
+    'English Type-Along Stories: Practice Typing with Classic Literature & Fables',
     'Browse and practice typing with English short stories, Aesop fables, O. Henry classics, and tech essays. Track WPM, typing accuracy, and speed in real-time.',
+  ),
   keywords: [
     'type along stories',
     'english typing stories',

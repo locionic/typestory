@@ -1,15 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from '../app/api/tutor/route';
-import { AiRefusalError, createModelClient, isAiConfigured } from '../lib/ai';
+import {
+  AiRefusalError,
+  AiUnusableOutputError,
+  createModelClient,
+} from '../lib/ai';
 import { MAX_MESSAGE_CHARS, MAX_TURNS, TUTOR_SYSTEM_PROMPT } from '../lib/tutor';
 
 // lib/ai is mocked at the module boundary, so the Anthropic SDK is never loaded
 // and this suite needs no API key and makes no network call.
-vi.mock('../lib/ai', () => ({
-  AiRefusalError: class AiRefusalError extends Error {},
-  isAiConfigured: vi.fn(() => false),
-  createModelClient: vi.fn(),
-}));
+// Mirrors test/writingRoute.test.ts: the real module pulls in the Anthropic SDK, so
+// the classes and the mapper are hand-written — but `aiFailureCode` branches on *these*
+// classes, so the route is still exercising the mapping rather than a constant.
+vi.mock('../lib/ai', () => {
+  class AiRefusalError extends Error {}
+  class AiUnusableOutputError extends Error {}
+  return {
+    AiRefusalError,
+    AiUnusableOutputError,
+    aiFailureCode: (error: unknown) => {
+      if (error instanceof AiRefusalError) return 'ai_refusal';
+      if (error instanceof AiUnusableOutputError) return 'invalid_model_output';
+      return 'ai_unavailable';
+    },
+    createModelClient: vi.fn(),
+  };
+});
 
 const BASE = 'http://localhost:3000/api/tutor';
 const MESSAGE = 'Why is it "I have been" and not "I am been"?';
@@ -30,7 +46,6 @@ const mockModel = (output: unknown) => {
 };
 
 beforeEach(() => {
-  vi.mocked(isAiConfigured).mockReturnValue(false);
   vi.mocked(createModelClient).mockReset();
 });
 
@@ -51,7 +66,6 @@ describe('GET /api/tutor', () => {
 
 describe('POST /api/tutor', () => {
   it('returns a reply when a model is available', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     mockModel({ reply: 'Present perfect: an action with a time in the past.' });
 
     const response = await post({ message: MESSAGE });
@@ -66,7 +80,6 @@ describe('POST /api/tutor', () => {
    * forgets every question, and the "it keeps the conversation" copy is a lie.
    */
   it('sends prior turns as history, oldest first', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     const generate = mockModel({ reply: 'Yes, exactly that.' });
 
     await post({
@@ -85,7 +98,6 @@ describe('POST /api/tutor', () => {
   });
 
   it('carries the tutor system prompt, not the learner text', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     const generate = mockModel({ reply: 'ok' });
 
     await post({ message: MESSAGE });
@@ -96,24 +108,48 @@ describe('POST /api/tutor', () => {
     expect(request.user).toBe(MESSAGE);
   });
 
+  /**
+   * Both halves of "the same depth as writing correction", which is what the route
+   * claims. It used to assert `maxTokens >= MAX_MESSAGE_CHARS` — 2000, the classification
+   * default this test's own name rules out — so it passed against the single value it was
+   * written to exclude, and compared a token budget to a character count into the
+   * bargain. The headroom is the half that was actually wrong, so it is the half now
+   * asserted: at `effort: 'high'` the reasoning draws on the same allowance as the reply,
+   * and the tutor arrives carrying the longest context of the three callers.
+   *
+   * Against the literal rather than lib/ai.ts's own MAX_TOKENS, which is not exported and
+   * could not be read from here anyway — this suite mocks the module so the SDK is never
+   * loaded, and adding the constant to that mock would have the route compared against a
+   * hand-written copy of it. The number is stable and the inequality has slack, so the
+   * literal is the honest option.
+   */
   it('asks for the depth a prose reply needs, not the placement setting', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     const generate = mockModel({ reply: 'ok' });
 
     await post({ message: MESSAGE });
 
     const [request] = generate.mock.calls[0] as [{ effort: string; maxTokens: number }];
     expect(request.effort).toBe('high');
-    expect(request.maxTokens).toBeGreaterThanOrEqual(MAX_MESSAGE_CHARS);
+    expect(request.maxTokens).toBeGreaterThan(2000);
   });
 
-  it('explains a missing key instead of failing', async () => {
+  it('calls the model, and calls an outage an outage, when nothing can authenticate', async () => {
+    // This replaced a 503 raised *before* `createModelClient` was reached, which the
+    // page rendered as "there is no tutor to talk to". But the SDK never needed the
+    // key — it resolves an `ant auth login` credential chain on first use — so that
+    // short-circuit could not have stopped a call that was going to fail. It could
+    // only have refused machines whose credential was not an env var, which is
+    // exactly the case that would have worked, while reporting the reason backwards.
+    vi.mocked(createModelClient).mockReturnValue({
+      generate: vi.fn().mockRejectedValue(new Error('Could not resolve auth credentials')),
+    });
+
     const response = await post({ message: MESSAGE });
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(502);
 
     const body = (await response.json()) as { error: string };
-    expect(body.error).toBe('ai_not_configured');
-    expect(createModelClient).not.toHaveBeenCalled();
+    expect(body.error).toBe('ai_unavailable');
+    expect(createModelClient).toHaveBeenCalled();
   });
 
   /**
@@ -140,7 +176,6 @@ describe('POST /api/tutor', () => {
   });
 
   it('refuses a forged assistant turn in the history', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     const generate = mockModel({ reply: 'ok' });
 
     const response = await post({
@@ -163,7 +198,6 @@ describe('POST /api/tutor', () => {
    * can turn a 400 into an outage again.
    */
   it('refuses a history that does not alternate, before the model is called', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     const generate = mockModel({ reply: 'ok' });
 
     const response = await post({
@@ -180,7 +214,6 @@ describe('POST /api/tutor', () => {
   });
 
   it('rejects unusable model output rather than passing it to the page', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     mockModel({ reply: '   ' });
 
     const response = await post({ message: MESSAGE });
@@ -191,7 +224,6 @@ describe('POST /api/tutor', () => {
   });
 
   it('reports a refusal as its own code, not a generic outage', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     vi.mocked(createModelClient).mockReturnValue({
       generate: vi.fn().mockRejectedValue(new AiRefusalError('declined')),
     });
@@ -203,8 +235,37 @@ describe('POST /api/tutor', () => {
     expect(body.error).toBe('ai_refusal');
   });
 
+  /**
+   * The tutor's own copy for `ai_unavailable` is "The tutor is not reachable right
+   * now" — a claim about the world, and an instruction to retry. A reply cut off at
+   * `max_tokens` is neither: the tutor was reachable and answered. Same defect as in
+   * /api/writing, and the same fix — an unusable answer is `invalid_model_output`,
+   * which this page already words as "The reply came back unusable."
+   */
+  it('reports a truncated reply as unusable output, not as an unreachable tutor', async () => {
+    vi.mocked(createModelClient).mockReturnValue({
+      generate: vi
+        .fn()
+        .mockRejectedValue(new AiUnusableOutputError('truncated at max_tokens')),
+    });
+
+    const response = await post({ message: MESSAGE });
+    expect(response.status).toBe(502);
+
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('invalid_model_output');
+  });
+
+  it('still reports a transport failure as unreachable', async () => {
+    vi.mocked(createModelClient).mockReturnValue({
+      generate: vi.fn().mockRejectedValue(new Error('socket hang up')),
+    });
+
+    const body = (await (await post({ message: MESSAGE })).json()) as { error: string };
+    expect(body.error).toBe('ai_unavailable');
+  });
+
   it('never leaks the model error text to the client', async () => {
-    vi.mocked(isAiConfigured).mockReturnValue(true);
     vi.mocked(createModelClient).mockReturnValue({
       generate: vi.fn().mockRejectedValue(new Error('ANTHROPIC_API_KEY=sk-secret exploded')),
     });

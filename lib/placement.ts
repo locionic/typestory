@@ -17,14 +17,38 @@ export type PlacementLevel = (typeof PLACEMENT_LEVELS)[number];
 /**
  * Share of a level's questions that must be right to hold that level. With four
  * questions per level this is a clean 3-of-4.
+ *
+ * Four questions a level means the only reachable rates are 0, ¼, ½, ¾ and 1, so
+ * 0.6 is never an exact rate and every threshold in (½, ¾] behaves identically. That also
+ * makes `cascade`'s `rate < PASS_RATE` indistinguishable from `rate <= PASS_RATE` — checked
+ * by canary on 2026-10-04: swapping it for `<=` left all 651 tests green.
+ *
+ * So the comparison is right by luck rather than by care, and adding a fifth question to any
+ * level puts 0.6 back in reach, at which point `<` and `<=` differ and the suite will not
+ * notice. `test/placement.test.ts:81` scores 3-of-4 and 2-of-4 against `PASS_RATE` itself,
+ * which is the test to extend with an exact-threshold case when that day comes.
  */
 export const PASS_RATE = 0.6;
 
 /** Trust boundary: a submission is untrusted input. */
 export const MAX_WRITING_CHARS = 2000;
+
+/**
+ * The two string caps, interpolated straight into the system prompt.
+ *
+ * Same reasoning as lib/writing.ts: structured outputs support neither array nor string
+ * constraints, so the schema cannot carry a ceiling and the prompt is the only channel
+ * left. `parseWritingGrade` clips over-long output to these three and keeps the grade —
+ * so a learner is told their band even when one span runs long — and writing the numbers
+ * into the prompt is what keeps the number the model is given and the number the
+ * validator enforces from drifting apart. MAX_CORRECTIONS is the exception: the prompt
+ * states that count by hand, at five, while the cap below is eight. The gap is the point
+ * — a model that answers with six or seven corrections lands inside it rather than having
+ * one dropped, and `test/placement.test.ts` holds the two numbers in that relationship.
+ */
 export const MAX_RATIONALE_LENGTH = 400;
-export const MAX_CORRECTIONS = 8;
 export const MAX_CORRECTION_LENGTH = 240;
+export const MAX_CORRECTIONS = 8;
 
 export interface PlacementQuestion {
   id: string;
@@ -262,7 +286,12 @@ Write rationale in one or two English sentences naming one specific strength and
 specific weakness. Put each correction in corrections as "original -> corrected", quoting
 only the words that need to change, and return an empty array when the text needs none.
 Return no more than five corrections. Never grade a text that is empty or too short to
-judge.`;
+judge.
+
+Length limits: keep the rationale under ${MAX_RATIONALE_LENGTH} characters and each
+correction under ${MAX_CORRECTION_LENGTH}. Going over one is not fatal — the field is
+trimmed with an ellipsis and the band survives — but a trimmed correction ends
+mid-sentence, so stay inside each limit with room to spare.`;
 
 export function buildWritingRequest(writing: string): { system: string; user: string } {
   return {
@@ -286,6 +315,23 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
+ * Clip an over-long model string to its cap, marked as clipped.
+ *
+ * The same rule and the same reason as `clip` in lib/writing.ts, which this one is a copy
+ * of rather than an import: the three model-output parsers already each carry their own
+ * `isObject`, and a shared module for a two-line pure function is not worth the coupling.
+ *
+ * Length used to reject, which made this parser all-or-nothing for the wrong reason — a
+ * 401-character rationale is a real rationale, and discarding it discarded the band with
+ * it, so a learner who answered the quiz well enough to sit a placement test was told the
+ * grader "came back unusable" over one long sentence. `parsePlacementRequest` still
+ * rejects an over-long submission, which is the opposite situation: that is the client
+ * sending something wrong, and the page caps its own box at exactly MAX_WRITING_CHARS.
+ */
+const clip = (value: string, max: number) =>
+  value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+
+/**
  * Model output is untrusted input like any other. output_config.format makes it
  * schema-shaped, not correct, so nothing downstream may read it unchecked.
  */
@@ -298,32 +344,31 @@ export function parseWritingGrade(raw: unknown): WritingGradeResult {
   if (!PLACEMENT_LEVELS.includes(raw.band as PlacementLevel)) {
     issues.push({ path: 'band', message: `expected one of ${PLACEMENT_LEVELS.join(', ')}` });
   }
-  if (typeof raw.rationale !== 'string' || raw.rationale.length === 0) {
+  // Trimmed, like every other "did the model actually say anything" check: the page
+  // renders the rationale directly under the band, and a whitespace-only one draws a
+  // blank line next to a graded level. Same reason as `isBlank` in lib/writing.ts.
+  if (typeof raw.rationale !== 'string' || raw.rationale.trim().length === 0) {
     issues.push({ path: 'rationale', message: 'expected a non-empty string' });
-  } else if (raw.rationale.length > MAX_RATIONALE_LENGTH) {
-    issues.push({
-      path: 'rationale',
-      message: `expected at most ${MAX_RATIONALE_LENGTH} characters`,
-    });
   }
   if (!Array.isArray(raw.corrections)) {
     issues.push({ path: 'corrections', message: 'expected an array of strings' });
-  } else if (raw.corrections.length > MAX_CORRECTIONS) {
-    issues.push({ path: 'corrections', message: `expected at most ${MAX_CORRECTIONS} entries` });
-  } else if (
-    raw.corrections.some(
-      (entry) => typeof entry !== 'string' || entry.length > MAX_CORRECTION_LENGTH,
-    )
-  ) {
-    issues.push({
-      path: 'corrections',
-      message: `expected strings of at most ${MAX_CORRECTION_LENGTH} characters`,
-    });
+  } else if (raw.corrections.some((entry) => typeof entry !== 'string')) {
+    // Count and length are not checked — see `clip`. Shape is: a correction the page
+    // cannot render at all is a failed grade, a long one is merely long.
+    issues.push({ path: 'corrections', message: 'expected an array of strings' });
   }
 
   if (issues.length > 0) return { ok: false, issues };
 
-  return { ok: true, value: raw as unknown as WritingGrade };
+  const corrections = (raw.corrections as unknown[]).slice(0, MAX_CORRECTIONS) as string[];
+  return {
+    ok: true,
+    value: {
+      band: raw.band as PlacementLevel,
+      rationale: clip(raw.rationale as string, MAX_RATIONALE_LENGTH),
+      corrections: corrections.map((entry) => clip(entry, MAX_CORRECTION_LENGTH)),
+    },
+  };
 }
 
 export type PlacementRequest = { answers: number[]; writing: string | null };

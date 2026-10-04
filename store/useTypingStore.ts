@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { SourceType, SwitchSound } from '../lib/types';
 import { soundEngine } from '../lib/audio';
+import { LANDING_PASSAGE } from '../lib/landing';
 
 const SOUND_KEY = 'typestory_switch_sound_v1';
 const SOUND_TYPES: readonly SwitchSound[] = ['blue', 'brown', 'bubble', 'mute'];
@@ -65,6 +66,14 @@ interface TypingState {
    * time the engine remounts and the previous session gets recorded again.
    */
   hasRecordedSession: boolean;
+  /**
+   * Whether the run that was recorded was actually kept.
+   *
+   * True until a write is refused, so it is never a claim before it is a fact. It lives
+   * here rather than in the engine's own state because the answer arrives inside an
+   * effect, and the board reads it by subscribing — the same path `isCompleted` takes.
+   */
+  sessionSaved: boolean;
 
   // Preferences
   switchSound: SwitchSound;
@@ -76,14 +85,37 @@ interface TypingState {
   setSound: (sound: SwitchSound) => void;
   loadCustomText: (text: string, title?: string, sourceType?: SourceType) => void;
   resetSession: () => void;
-  markSessionRecorded: () => void;
+  /** Claims the right to record this run's session. False if it is already claimed. */
+  markSessionRecorded: () => boolean;
+  /** Reports the outcome of the write `markSessionRecorded` authorised. */
+  setSessionSaved: (saved: boolean) => void;
 }
 
 export const useTypingStore = create<TypingState>((set, get) => ({
-  title: 'Full-Stack Architecture: Interview Q&A',
+  // The landing page's passage, and the story it is copied from.
+  //
+  // These are two literals rather than `STORIES[0]` because the store is imported by
+  // every client surface — navbar, engine, each page's board — and data/stories.ts holds
+  // all eleven stories. Pulling the catalog into the client bundle to read one paragraph
+  // is the wrong trade for a first-run sample.
+  //
+  // Copying it is safe as long as the copy is honest, and it was not: the title named a
+  // story that has never existed ("Full-Stack Architecture: Interview Q&A" beside the real
+  // "Full-Stack & Next.js: Technical Interview Q&A"), and the passage appeared in none of
+  // them. Finishing this run records a session, so a first-time learner's opening history
+  // row was badged "story" with a title the catalog cannot produce and text the app
+  // cannot show again.
+  //
+  // They name a real story and quote one of its paragraphs, which is what every other
+  // `sourceType: 'story'` session in the app is. `test/typingStore.test.ts` asserts the
+  // pair against STORIES, so an edit to either string that breaks the link fails there.
+  //
+  // Held in `lib/landing.ts` rather than written here, because the landing page is a server
+  // component that cannot seed the store and so has to be handed this passage to pass on.
+  // Both ends read one constant, which is the only way they cannot drift.
+  title: LANDING_PASSAGE.title,
   sourceType: 'story',
-  targetText:
-    'Q: What are the core pillars of modern full-stack web architecture? A: Modern full-stack architecture combines reactive React frontends, type-safe backends, automated CI/CD pipelines, and scalable cloud infrastructure.',
+  targetText: LANDING_PASSAGE.text,
   typedText: '',
 
   startTime: null,
@@ -94,6 +126,7 @@ export const useTypingStore = create<TypingState>((set, get) => ({
   incorrectKeystrokes: 0,
   isCompleted: false,
   hasRecordedSession: false,
+  sessionSaved: true,
 
   switchSound: startingSound,
 
@@ -185,6 +218,7 @@ export const useTypingStore = create<TypingState>((set, get) => ({
       incorrectKeystrokes: 0,
       isCompleted: false,
       hasRecordedSession: false,
+      sessionSaved: true,
     });
   },
 
@@ -199,12 +233,30 @@ export const useTypingStore = create<TypingState>((set, get) => ({
       incorrectKeystrokes: 0,
       isCompleted: false,
       hasRecordedSession: false,
+      sessionSaved: true,
     });
   },
 
   markSessionRecorded: () => {
+    // Checked and set together, against live state, so two callers in the same tick
+    // cannot both win. A component cannot do this for itself: it only sees the value
+    // its own render captured, so a second run of the same effect before a re-render
+    // reads the same stale `false` the first one read and records a second time. That
+    // is what StrictMode does in development, running mount effects twice.
+    //
+    // Kept in the store rather than in a ref precisely because of what the store also
+    // holds: the flag survives a remount, so navigating away from a finished passage
+    // still cannot re-record it.
+    if (get().hasRecordedSession) return false;
     set({ hasRecordedSession: true });
+    return true;
   },
+
+  // One line, and it is here rather than in the engine's own state because the answer
+  // arrives inside an effect. A component that held it in `useState` would be writing
+  // state from an effect to publish a value, which is what the store already does for
+  // every other field on this board — and what the React lint rules are there to catch.
+  setSessionSaved: (saved) => set({ sessionSaved: saved }),
 }));
 
 /**
@@ -229,24 +281,41 @@ export function normalizeTypableText(text: string): string {
     // type — and because the caret advances on every keystroke, the one that
     // overshoots it can never turn green, so it deflates WPM and the recorded
     // accuracy for the whole passage. They reach a paste routinely: CMS output,
-    // Google Docs and PDF extractors all emit them, and `trim()` removes one only
-    // at the *ends* of a string, so /custom's `disabled={!inputText.trim()}` lets
-    // them straight through. U+202E is the worst of the set — it reorders the
-    // visible text, so the board and the target disagree.
+    // Google Docs and PDF extractors all emit them. U+202E is the worst of the set —
+    // it reorders the visible text, so the board and the target disagree.
+    //
+    // Removed rather than merely trimmed because no gate can catch them where they
+    // actually occur. /custom used to ask `!inputText.trim()` whether there was
+    // anything to type, and `trim()` strips only at the *ends* of a string, so the one
+    // that mattered most — a paragraph of real text with a soft hyphen in the middle
+    // of it — passed. It normalizes now, so a paste made *entirely* of these is
+    // refused with the button disabled; that gate is one character long and only
+    // answers about the whole string, which is why the deletion below still does the
+    // work for everything that gets past it.
     //
     // Runs before the collapse below so the space it uncovers gets folded, and
     // before the space class so a run of U+2028 still collapses.
     //   U+00AD soft hyphen, U+200B-200F, U+202A-202E bidi, U+2060 word joiner,
-    //   U+2066-2069 isolates, U+FEFF BOM
+    //   U+2066-2069 isolates
     //
     // U+2060 belongs here rather than with the spaces: it *joins* two words, so
     // spacing it would insert a break the author never wrote.
-    .replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, '')
+    .replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069]/g, '')
     // Exotic spaces and separators become a plain space rather than vanishing:
     // they do separate two words, so deleting them would fuse "a\u3000b" into "ab".
     //   U+00A0 NBSP, U+1680 ogham, U+2000-200A spaces, U+2028/U+2029 separators,
-    //   U+202F narrow NBSP, U+3000 ideographic
-    .replace(/[\u00A0\u1680\u2000-\u200A\u2028-\u2029\u202F\u3000]/g, ' ')
+    //   U+202F narrow NBSP, U+3000 ideographic, U+FEFF zero-width no-break space
+    //
+    // U+FEFF was listed for deletion above, on the grounds that a byte-order mark only
+    // ever occurs at offset 0. Those two reasons cancel out: the `trim()` at the end of
+    // this chain already strips U+FEFF at both ends and leaves interior occurrences
+    // alone, so listing it for deletion did nothing at the one offset it was justified
+    // by — while its only live effect was mid-string, where it is a separator. Deleting
+    // it there fused "a<U+FEFF>b" into "ab", dropped a word from the count, and asked
+    // the learner to type the fused text. A BOM is also the only use Unicode still
+    // permits for this character; its zero-width-no-break-space use is deprecated
+    // precisely because it breaks text processing the way that did.
+    .replace(/[\u00A0\u1680\u2000-\u200A\u2028-\u2029\u202F\u3000\uFEFF]/g, ' ')
     .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
     .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
     .replace(/[\u2013\u2014]/g, '-')

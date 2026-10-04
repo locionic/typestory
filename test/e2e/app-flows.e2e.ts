@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import puppeteer, { type Browser, type ElementHandle, type Page } from 'puppeteer-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { VOCAB_BANKS } from '../../data/vocab';
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -133,13 +134,101 @@ let browser: Browser | undefined;
 let baseUrl = '';
 let dataDir = '';
 
+/**
+ * Everything the browser complained about, for the guard at the bottom of this file.
+ *
+ * The suite asserted only what it could read off the page, so a hydration mismatch or a
+ * runtime error anywhere underneath a journey passed all thirteen — the app would have
+ * been broken in a way no test could see, which is the failure mode most worth catching
+ * in an app whose whole subject is a keystroke at a time.
+ *
+ * The URL is kept because the journeys that fail on purpose fail *visibly*: a fetch
+ * answered with a 502 leaves Chrome's "Failed to load resource" in the console, and the
+ * message alone says nothing about which endpoint it was. Paired with the status it is the
+ * one entry that can be both provoked and recognised, which is what lets the other three
+ * tolerated failures name a status each — see `EXPECTED_FAILURES`.
+ */
+const browserComplaints: { text: string; url: string }[] = [];
+
+/**
+ * Every failure this suite provokes on purpose, and the one status each may answer with.
+ *
+ * `/api/placement` is not here because it degrades: it answers 200 with the quiz result
+ * and a failed writing outcome, so it produces no browser-level failure at all.
+ *
+ * Status is matched, not just the URL. A URL on this list that answered 500 instead would
+ * be a real defect hiding behind a line written for a 404, and a filter that knew only the
+ * URL could not tell those two apart.
+ */
+const EXPECTED_FAILURES: { url: string; status: number }[] = [
+  // A device that has never saved anything. Documented at app/api/progress/route.ts:7 as
+  // `200 { record } | 400 | 404` and handled by the client, so it is the ordinary state of
+  // a first load rather than a failure at all — but only the 404 is expected here, and the
+  // journeys that write progress still have to reach the same URL successfully.
+  { url: '/api/progress', status: 404 },
+  { url: '/api/writing', status: 502 },
+  { url: '/api/tutor', status: 502 },
+];
+
+/** The status out of Chrome's `Failed to load resource: ... status of NNN (Not Found)`. */
+const statusOf = (text: string): number | undefined => {
+  const match = /status of (\d{3})/.exec(text);
+  return match ? Number(match[1]) : undefined;
+};
+
+function watchPage(page: Page) {
+  // `error` arrives as `unknown`, so the message is narrowed here rather than asserted:
+  // the point of the collector is to report what went wrong, including when what went
+  // wrong was not an `Error`.
+  page.on('pageerror', (error: unknown) =>
+    browserComplaints.push({
+      text: `pageerror: ${error instanceof Error ? error.message : String(error)}`,
+      url: '',
+    }),
+  );
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      browserComplaints.push({ text: message.text(), url: message.location().url ?? '' });
+    }
+  });
+}
+
+/**
+ * The only way this suite opens a page.
+ *
+ * This started as `browser.on('targetcreated', ...)`, which reads as the way to watch every
+ * page without touching thirteen call sites. It is also a lost message: `target.page()` is
+ * a promise, so the listeners attach a tick after the target exists, and the first page of
+ * a run is exactly where that tick can land between navigation and a hydration error. The
+ * same guard passed one run and failed the next with no code change in between, which is
+ * the signature of a check whose result does not depend on what happened.
+ *
+ * Attaching before the page navigates is not worth being clever about.
+ */
+async function newPage(): Promise<Page> {
+  const page = await browser!.newPage();
+  watchPage(page);
+  return page;
+}
+
 beforeAll(async () => {
   // Chrome is looked for *before* the server is booted. Every test skips without it, so
   // starting `next start` first meant a machine with no browser still waited out the 90s
   // server timeout and then threw "Server never became ready" — a hard failure for a run
   // that has nothing to run, on a machine that never needed `npm run build` anyway.
   const chrome = findChrome();
-  if (!chrome) return;
+  if (!chrome) {
+    // The skip below is deliberate — see why — but it has one consequence not worth
+    // keeping: every test skips, the suite exits 0, and a green run then says nothing
+    // about whether any journey works. Say so where someone will see it, because
+    // failing is precisely what this branch exists to avoid.
+    process.stderr.write(
+      '\n  No Chrome found (looked in CHROME_PATH and the usual Linux/macOS paths).\n' +
+        '  Every end-to-end journey will SKIP — this run verifies nothing.\n' +
+        '  Set CHROME_PATH to a Chrome/Chromium binary to run them.\n\n',
+    );
+    return;
+  }
 
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -154,9 +243,48 @@ beforeAll(async () => {
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'typestory-e2e-'));
 
   const nextBin = path.join(process.cwd(), 'node_modules', 'next', 'dist', 'bin', 'next');
-  server = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], {
+
+  // Build before starting, because `next start` serves whatever `.next` happens to
+  // contain and this suite used to assume that was the current source. It is not:
+  // after editing a page and running `npm run test:e2e`, the server came up on the
+  // previous build and every journey passed against code that no longer existed. It
+  // is not a hypothetical — it is how the vocabulary deep-link test below came to pass
+  // against a reverted href, and how one unrelated journey flaked against a build from
+  // two edits earlier. A green run has to mean the current tree, or it means nothing.
+  //
+  // `next build` rather than `next dev`, which would be a second, differently-behaving
+  // server: these are production journeys, hydration is a real race here, and the
+  // other 12 tests are all written against what a build produces.
+  const build = spawn(process.execPath, [nextBin, 'build'], {
     stdio: 'ignore',
     env: { ...process.env, NODE_ENV: 'production', TYPE_STORY_DATA_DIR: dataDir },
+  });
+  const buildExit = await new Promise<number>((resolve) =>
+    build.on('exit', (code) => resolve(code ?? 1)),
+  );
+  if (buildExit !== 0) {
+    throw new Error(`next build exited ${buildExit}; the journeys below would test nothing.`);
+  }
+
+  server = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], {
+    stdio: 'ignore',
+    // ANTHROPIC_BASE_URL is pointed at a closed local port so the three AI journeys
+    // below are hermetic. They assert that a feature which cannot reach the model
+    // degrades and says so, and that used to be decided before the model was ever
+    // called: the routes short-circuited on a missing ANTHROPIC_API_KEY. Now that the
+    // short-circuit is gone — the SDK resolves an `ant auth login` credential chain
+    // when the env var is absent, so refusing on its absence refused working machines —
+    // those journeys would inherit whatever credential this machine happens to have.
+    // A developer running them with a real key would get real answers, real failures, and
+    // a bill; a 401 from the real API would work just as well but is a network round trip
+    // per test. Port 1 is closed, so the connection is refused locally and instantly, and
+    // the outcome is the same on a laptop with credentials and on a bare CI box.
+  env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      TYPE_STORY_DATA_DIR: dataDir,
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:1',
+    },
   });
   await waitForServer(baseUrl);
 
@@ -171,6 +299,39 @@ afterAll(async () => {
   await browser?.close();
   server?.kill('SIGTERM');
   if (dataDir) await fs.rm(dataDir, { recursive: true, force: true });
+
+  /**
+   * Measured, not assumed — and the measurement had to be an assertion to be worth
+   * anything. A first attempt logged the complaints from this hook and reported zero,
+   * which was false: vitest swallows `console.log` written from a hook like this one, so
+   * the clean result and a collector that had never fired looked identical. The same
+   * run that swallowed the log is what made a canary test necessary — with the log in
+   * place there was no way to tell the two apart.
+   *
+   * The canary also corrected the substance: there is noise to filter after all. Chrome
+   * logs "Failed to load resource" for the 502s those journeys provoke, so each tolerated
+   * failure is matched on its URL *and* the status it is allowed to answer with, and
+   * everything else fails the suite. A page's own `console.error` carries no such status
+   * and no such URL, so it can never be absorbed by the filter.
+   *
+   * ponytail: this catches page errors and `console.error`. It does not see a resource
+   * that failed to load without reaching a console message, and it does not see a
+   * network failure the browser swallowed. Adding CDP `Log` capture would widen it, at
+   * the cost of filtering Chrome's own request noise — worth it if a journey ever comes
+   * to depend on a response status it does not read.
+   */
+  const unexpected = browserComplaints.filter(
+    (complaint) =>
+      !EXPECTED_FAILURES.some(
+        (expected) =>
+          complaint.url.includes(expected.url) && statusOf(complaint.text) === expected.status,
+      ),
+  );
+  expect(
+    unexpected,
+    `The browser reported ${unexpected.length} unexpected problem(s).\n` +
+      `All complaints:\n${browserComplaints.map((c) => `  [${c.url || 'no url'}] ${c.text}`).join('\n')}`,
+  ).toEqual([]);
 });
 
 describe('the sound preference', () => {
@@ -188,7 +349,7 @@ describe('the sound preference', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 390, height: 844 });
@@ -236,7 +397,7 @@ describe('story navigation', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 1000 });
@@ -298,7 +459,7 @@ describe('the custom text arena', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 900 });
@@ -344,6 +505,17 @@ describe('the custom text arena', () => {
 
       // React commits on its own schedule, so wait for the gate rather than reading
       // the button in the same tick that dispatched the event.
+      //
+      // 10s, not 5s: every other wait in this file budgets 10s or more, and this was the
+      // only one below that. It failed three consecutive times in a row on a loaded
+      // machine — each at 5.2-5.4s, i.e. sitting on the ceiling — and passed on every run
+      // since, against the same code and the same build. The gate itself is one React
+      // commit off one dispatched event and cannot plausibly take seconds, so this is the
+      // harness under load rather than the app; what exactly starves it (renderer
+      // contention, or throttling of a backgrounded page) was not established. Widening
+      // the budget is the fix for what was actually observed. If it ever fails at 10s, that
+      // is a different and real failure, and this comment should be replaced by its cause
+      // rather than the number raised again.
       await page.waitForFunction(
         (text) => {
           const button = [...document.querySelectorAll('button')].find((b) =>
@@ -351,7 +523,7 @@ describe('the custom text arena', () => {
           );
           return Boolean(button && button.disabled);
         },
-        { timeout: 5000 },
+        { timeout: 10_000 },
         LABEL,
       );
       expect(await isEnabled()).toBe(false); // the dead end cannot be entered
@@ -371,7 +543,7 @@ describe('typing flow', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 900 });
@@ -389,6 +561,15 @@ describe('typing flow', () => {
       await page.keyboard.type('Qz', { delay: 0 });
       await page.keyboard.press('Backspace');
       await page.keyboard.press('Backspace');
+
+      // Escape, and not another backspace, because backspacing un-advances the caret but
+      // does not refund the key: the probe's one wrong character stays in the counters and
+      // is scored against the run below. `waitForTypingEngine` resets for the same reason,
+      // and the arithmetic is why this matters — the landing passage is 281 characters, so
+      // that one error is 99.6% of the run, which `Math.round` used to display as a perfect
+      // score and record as one. The board floors it now, so this assertion is what says a
+      // flawless run is the only thing that records 100.
+      await page.keyboard.press('Escape');
 
       // Finish the passage for a clean 100% run.
       await page.keyboard.type(targetText, { delay: 0 });
@@ -413,6 +594,70 @@ describe('typing flow', () => {
   });
 
   /**
+   * A wrong keystroke has to be identifiable without being able to see colour.
+   *
+   * The board marked a landed character emerald and a missed one rose, and stopped
+   * there — so the entire feedback loop depended on telling those two hues apart. The
+   * faint 20% background and the rounding are not a second signal; at any usable
+   * contrast they are the same signal twice. A learner with a colour vision deficiency
+   * read the same text twice and had no way to find their typos, which is WCAG 2.2
+   * SC 1.4.1 failing on the one thing this app exists to tell you.
+   *
+   * Asserted against the real DOM because that is the only place the styling lives:
+   * the unit config's include list covers plain `.ts` tests and not `.tsx`, and the repo
+   * has no React testing library, so a class on a character span has no other home. The
+   * class is checked rather than a computed colour on purpose — a colour assertion would
+   * pass for any palette, including the two this defect shipped in.
+   */
+  it('marks a wrong character by shape as well as by colour', async (ctx) => {
+    if (!browser) {
+      ctx.skip();
+      return;
+    }
+    const page = await newPage();
+
+    try {
+      await page.setViewport({ width: 1280, height: 900 });
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+      await waitForTypingEngine(page);
+
+      let targetText = '';
+      for (let attempt = 0; attempt < 40 && !targetText; attempt++) {
+        targetText = await readTargetText(page);
+        if (!targetText) await sleep(100);
+      }
+      expect(targetText.length).toBeGreaterThan(50);
+
+      const cueAt = (index: number) =>
+        page.evaluate((i) => {
+          const board = Array.from(document.querySelectorAll('div'))
+            .map((el) => ({ el, spans: el.querySelectorAll(':scope > span').length }))
+            .filter((candidate) => candidate.spans > 5)
+            .sort((a, b) => b.spans - a.spans)[0]?.el;
+          if (!board) return null;
+          return board.children[i]?.className ?? null;
+        }, index);
+
+      // All three states, because a cue worn by everything discriminates nothing. An
+      // assertion on the wrong state alone would pass for a blanket underline, which
+      // is the same defect with the colour swapped out.
+      const untyped = await cueAt(1);
+      expect(untyped).not.toContain('underline');
+
+      // Wrong first: anything that is not the target's own first character.
+      await page.keyboard.type(targetText[0] === 'x' ? 'y' : 'x', { delay: 0 });
+      expect(await cueAt(0)).toContain('underline');
+
+      // Escape resets the run; the same position, typed correctly, carries no cue.
+      await page.keyboard.press('Escape');
+      await page.keyboard.type(targetText[0], { delay: 0 });
+      expect(await cueAt(0)).not.toContain('underline');
+    } finally {
+      await page.close();
+    }
+  });
+
+  /**
    * Regression: the completion card and the session record each measured the run
    * separately — the card off `elapsedSeconds` (the 250ms display tick, which floors
    * and stops on completion) and the record off `round((endTime - startTime) / 1000)`.
@@ -428,7 +673,7 @@ describe('typing flow', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 900 });
@@ -479,7 +724,7 @@ describe('typing flow', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     // The nav is client-side, so the typing store survives it — a full goto would
     // wipe the store and hide the very bug this is guarding against.
@@ -548,7 +793,7 @@ describe('backup flow', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
     page.on('dialog', (dialog) => void dialog.accept());
 
     try {
@@ -616,7 +861,7 @@ describe('writing correction flow', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 1000 });
@@ -645,10 +890,11 @@ describe('writing correction flow', () => {
 
       await clickButton(page, 'Check my writing');
 
-      // No ANTHROPIC_API_KEY in this environment: the page must say so plainly
-      // rather than hanging on a spinner or rendering an empty report.
+      // The model is unreachable here (see ANTHROPIC_BASE_URL in the server spawn):
+      // the page must say so plainly rather than hanging on a spinner or rendering
+      // an empty report.
       await page.waitForFunction(
-        () => document.body.innerText.includes('no ANTHROPIC_API_KEY set'),
+        () => document.body.innerText.includes('not reachable right now'),
         { timeout: 30_000 },
       );
       expect(await isDisabled()).toBe(false);
@@ -664,7 +910,7 @@ describe('tutor flow', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 1000 });
@@ -689,10 +935,10 @@ describe('tutor flow', () => {
 
       await page.click('button[type=submit]');
 
-      // No ANTHROPIC_API_KEY in this environment: the tutor must say so plainly
-      // rather than hanging on a spinner.
+      // The model is unreachable here (see ANTHROPIC_BASE_URL in the server spawn):
+      // the tutor must say so plainly rather than hanging on a spinner.
       await page.waitForFunction(
-        () => document.body.innerText.includes('no ANTHROPIC_API_KEY set'),
+        () => document.body.innerText.includes('not reachable right now'),
         { timeout: 30_000 },
       );
 
@@ -712,7 +958,7 @@ describe('navigation', () => {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       // The nav used to be `hidden md:flex`, so below 768px none of the routes
@@ -737,12 +983,12 @@ describe('navigation', () => {
 });
 
 describe('placement flow', () => {
-  it('places a learner from the quiz alone when no AI key is configured', async (ctx) => {
+  it('places a learner from the quiz alone when the model cannot be reached', async (ctx) => {
     if (!browser) {
       ctx.skip();
       return;
     }
-    const page = await browser.newPage();
+    const page = await newPage();
 
     try {
       await page.setViewport({ width: 1280, height: 1000 });
@@ -755,11 +1001,12 @@ describe('placement flow', () => {
       const submit = 'form button[type=submit]';
       expect(await page.$eval(submit, (el) => (el as HTMLButtonElement).disabled)).toBe(true);
 
-      // The four A1 questions, answered correctly; everything else wrong. The
-      // result card draws its ticks from the pass rate the route ships, so this is
-      // the only fixture that can show one appearing — an answer key that stops
-      // arriving leaves `rate >= undefined`, which is false, and the card renders no
-      // ticks at all while saying nothing about it.
+      // The four A1 questions, answered correctly; everything else wrong. The card
+      // ranks its ticks against `objective.level` rather than against each level's own
+      // rate — `held` is `levels.indexOf(level) <= indexOf(objective.level)`, the
+      // cascade's verdict — so 4/4 on A1 ticks A1 and leaves A2 and B1 bare whatever
+      // they scored. The rates below still draw the bars, and still decide whether the
+      // sentence about a score that did not carry appears.
       const A1_ANSWERS = [1, 0, 2, 2];
       for (const [i, fieldset] of (await page.$$('fieldset')).entries()) {
         const radios = await fieldset.$$('input[type=radio]');
@@ -778,9 +1025,20 @@ describe('placement flow', () => {
 
       const body = await page.evaluate(() => document.body.innerText);
       expect(body).toMatch(/\b(A1|A2|B1)\b/);
-      // No ANTHROPIC_API_KEY in this environment, so the quiz must stand alone and
-      // the page must say so rather than showing a broken feedback panel.
-      expect(body).toContain('Your writing was not graded');
+      // The model is unreachable here (see ANTHROPIC_BASE_URL in the server spawn), so
+      // the quiz must stand alone and the page must say so rather than showing a
+      // broken feedback panel.
+      //
+      // The failing branch, not the skipping one, and the difference is the assertion.
+      // The route used to report a missing ANTHROPIC_API_KEY as 'skipped', so a learner
+      // who had typed an essay and asked for it to be graded was told "That is normal
+      // — the writing check is optional". That short-circuit is gone: the SDK resolves
+      // an `ant auth login` credential chain when the env var is absent, so refusing on
+      // its absence refused machines that could have worked. An unreachable model is
+      // now a failure of ours to report rather than a choice the learner made, and only
+      // an empty box is a skip.
+      expect(body).toContain('Your writing could not be graded');
+      expect(body).not.toContain('That is normal');
 
       // One row per level the route shipped, and a tick on exactly the level the
       // 4/4 cleared. Read against the API rather than against the page, so this
@@ -797,6 +1055,78 @@ describe('placement flow', () => {
 
       expect(rows.map((row) => row.text.split(' ')[0])).toEqual(levels);
       expect(rows.filter((row) => row.ticked).map((row) => row.text.split(' ')[0])).toEqual(['A1']);
+    } finally {
+      await page.close();
+    }
+  });
+});
+describe('vocabulary bank links', () => {
+  /**
+   * The landing page's three bank cards are its only deep links into /vocab, and all
+   * three pointed at a bare `/vocab`. That route opens whichever bank is first, so
+   * clicking the card that reads "IELTS Academic Vocabulary" and "120 core words"
+   * arrived at Full-Stack terminology — a card that looks like a link to a bank and is
+   * not one, with nothing on screen saying the click had been thrown away. The section
+   * header's "Explore word banks" link is unaffected either way; it never named a bank.
+   *
+   * Asserted against the real DOM because the assertion *is* navigation: the two halves
+   * of the defect live in two files (`app/page.tsx` builds the href, `app/vocab/page.tsx`
+   * reads it) and no unit test can see the join. Picking the middle bank matters too —
+   * the first one is what a bare `/vocab` opens, so testing only the first would pass
+   * against the defect exactly as it shipped.
+   */
+  it('opens the bank the card named, not the first one', async (ctx) => {
+    if (!browser) {
+      ctx.skip();
+      return;
+    }
+    const page = await newPage();
+
+    try {
+      // From the data, not from a literal typed here: a rename in data/vocab.ts should
+      // move both the card and this expectation, and a reordering should not break them.
+      const bank = VOCAB_BANKS.find((b) => b.slug === 'ielts-academic')!;
+
+      await page.setViewport({ width: 1280, height: 900 });
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+
+      // The card itself, addressed by the bank it advertises rather than by its
+      // position, so reordering the grid cannot silently retarget the test.
+      const clicked = await page.evaluate((wanted) => {
+        const card = Array.from(document.querySelectorAll('a')).find(
+          (link) => link.textContent?.includes(wanted) && link.textContent?.includes('core words'),
+        );
+        if (!card) return null;
+        const href = card.getAttribute('href');
+        card.click();
+        return { wanted, href };
+      }, bank.title);
+      expect(clicked, 'no vocabulary bank card advertises itself').not.toBeNull();
+      expect(clicked!.href).toBe(`/vocab?bank=${bank.slug}`);
+
+      // Polled rather than awaited on a navigation event: the click is a client-side
+      // transition, so the URL changes in the same tick as the render and there is no
+      // event to wait on. 100 × 100ms is the same budget waitForTypingEngine uses.
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (page.url().includes('/vocab')) break;
+        await sleep(100);
+      }
+      expect(page.url()).toContain('/vocab');
+      await waitForTypingEngine(page);
+
+      // The headline word is the first word of that bank, and the typing board below
+      // holds the same one — proof the whole page followed the link rather than just
+      // the tab ring, which is a class a stylesheet can set on the wrong element.
+      // The board is read with the file's own helper: `querySelectorAll('span')` also
+      // matches the nav and the virtual keyboard, and joining those in gives a string
+      // that begins with neither this word nor any other.
+      const landed = await page.evaluate(
+        () => document.querySelector('h2.font-black')?.textContent?.trim() ?? null,
+      );
+      const boardText = await readTargetText(page);
+
+      expect(landed).toBe(bank.words[0].word);
+      expect(boardText.startsWith(bank.words[0].word)).toBe(true);
     } finally {
       await page.close();
     }

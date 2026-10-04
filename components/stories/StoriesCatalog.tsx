@@ -25,6 +25,17 @@ const LEVELS = [
   { id: 'advanced', label: 'Advanced (C1-C2)' },
 ];
 
+/**
+ * CEFR order, for the sort below.
+ *
+ * All six labels are the same length, so comparing the strings compares the levels: `A1`
+ * through `C2` fall into place with no lookup table, and a seventh level added to
+ * `CefrLevel` sorts itself in. A tie returns 0, which leaves that pair in authoring order
+ * — `Array#sort` is stable, and the corpus has no view of its own on a B2 classic against
+ * a B2 interview module.
+ */
+const byLevel = (a: StoryItem, b: StoryItem) => (a.level < b.level ? -1 : a.level > b.level ? 1 : 0);
+
 export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -64,7 +75,17 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
       .sort((a, b) => {
         if (sortBy === 'shortest') return a.wordCount - b.wordCount;
         if (sortBy === 'longest') return b.wordCount - a.wordCount;
-        return 0; // recommended order
+        /* Recommended: easiest first. This returned 0 — not a slow sort, the absence of
+         * one — so the default view was the order the files were authored in, which is
+         * four technical interview modules then the fable then everything else. It is the
+         * first thing every learner sees with no filters set, so the order is a claim about
+         * where to start, and under a label promising a recommendation it was making
+         * none. Sorted this way the list reads A2 fable, A2 dialogue, B1 tech, B1 classic,
+         * then the B2s and the one C1: mixed genre at the top *and* monotone in
+         * difficulty. Featured-first was the other candidate and the weaker one — it lifts
+         * three stories to the top and leaves four tech modules directly beneath them.
+         * See test/catalogFilters.test.ts. */
+        return byLevel(a, b);
       });
   }, [initialStories, searchQuery, selectedCategory, selectedLevel, sortBy]);
 
@@ -75,25 +96,43 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {/* Search Input */}
           <div className="relative flex-1">
+            {/* The one control in the app with no accessible name, and the one a screen
+                reader user needs it on most: it is the only way to reach a story other
+                than by filtering. Both selects below carry `aria-label`, /tutor, /writing
+                and /custom use a real `<label htmlFor>`, and a placeholder is neither —
+                it is not an accessible name, and it stops saying what the field is the
+                moment a character is typed. `sr-only` rather than visible because the
+                icon and the placeholder already carry the idea to anyone who can see
+                them; this carries it to the ones who cannot. */}
+            <label htmlFor="stories-search" className="sr-only">
+              Search stories by title, author, or topic
+            </label>
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
+              id="stories-search"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search stories by title, author, or topic..."
-              className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-2.5 pl-10 pr-4 text-xs sm:text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-gray-800 dark:bg-gray-850 dark:text-white dark:placeholder-gray-500"
+              className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-2.5 pl-10 pr-4 text-xs sm:text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-gray-800 dark:bg-gray-800 dark:text-white dark:placeholder-gray-500"
             />
           </div>
 
           {/* Level Filter Dropdown & Sort */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-850 dark:text-gray-300">
+            <div className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300">
               <Filter className="h-3.5 w-3.5 text-indigo-500" />
               <select
                 aria-label="Filter stories by proficiency level"
                 value={selectedLevel}
                 onChange={(e) => setSelectedLevel(e.target.value)}
-                className="bg-transparent font-medium focus:outline-none"
+                // No `focus:outline-none`, and nothing in its place either — this and the
+                // sort control below, and the header's keyboard-sound select, all took the
+                // browser's focus ring and left no replacement, so tabbing past them showed
+                // nothing at all. Every other control in the app either keeps the default
+                // ring or swaps it for a border colour; these two had neither. See
+                // test/focusVisible.test.ts.
+                className="bg-transparent font-medium"
               >
                 {LEVELS.map((lvl) => (
                   <option key={lvl.id} value={lvl.id}>
@@ -107,7 +146,7 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
               aria-label="Sort stories"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as 'recommended' | 'shortest' | 'longest')}
-              className="rounded-2xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs font-medium text-gray-700 focus:outline-none dark:border-gray-800 dark:bg-gray-850 dark:text-gray-300"
+              className="rounded-2xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs font-medium text-gray-700 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300"
             >
               <option value="recommended">Recommended</option>
               <option value="shortest">Shortest first</option>
@@ -123,6 +162,14 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
               key={cat.id}
               type="button"
               onClick={() => setSelectedCategory(cat.id)}
+              /* `aria-pressed`, because the two class names below were the only thing on
+                * this page that said which filter was active. Six buttons that differed
+                * only in background colour, so a screen reader announced all six alike —
+                * "All Stories, button", "Fables, button" — and the learner could see the
+                * selection without being able to reach it. On all six rather than only the
+                * active one: announcing five of them as available is the point. SC 4.1.2.
+                * See test/catalogFilters.test.ts. */
+              aria-pressed={selectedCategory === cat.id}
               className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
                 selectedCategory === cat.id
                   ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20'
@@ -147,7 +194,6 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
               setSearchQuery('');
               setSelectedCategory('all');
               setSelectedLevel('all');
-              setSortBy('recommended');
             }}
             className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
           >
@@ -191,7 +237,11 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
                   {story.title}
                 </h2>
 
-                <p className="mt-1 text-xs text-gray-400">By {story.author}</p>
+                <p className="mt-1 text-xs text-gray-400">
+                  {/* See `StoryItem.authorIsPerson`: a series is credited, not authored. */}
+                  {story.authorIsPerson && 'By '}
+                  {story.author}
+                </p>
 
                 <p className="mt-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
                   {story.summary}
@@ -205,12 +255,12 @@ export default function StoriesCatalog({ initialStories }: StoriesCatalogProps) 
                     <span>~{story.readingTimeMinutes} min</span>
                   </span>
                   <span>
-                    {story.category === 'tech' ? `${story.paragraphs.length} Q&A Questions` : `${story.wordCount} words`}
+                    {story.isQA ? `${story.qaCount} Q&A Questions` : `${story.wordCount} words`}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between font-semibold text-xs text-indigo-600 dark:text-indigo-400">
-                  <span>{story.category === 'tech' ? 'Practice Q&A Session' : 'Start Typing Session'}</span>
+                  <span>{story.isQA ? 'Practice Q&A Session' : 'Start Typing Session'}</span>
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </div>
               </div>

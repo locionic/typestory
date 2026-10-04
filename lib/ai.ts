@@ -22,7 +22,9 @@ export const AI_MODEL = 'claude-opus-5-5';
 /**
  * A graded answer is a short structured classification, not an essay, so this
  * sits far below the 16k non-streaming default. Prose-feedback callers pass
- * their own figure through `StructuredRequest.maxTokens`.
+ * their own figure through `StructuredRequest.maxTokens` — and had better pass
+ * more than this, since the two callers that do carry prose are also the two that
+ * ask for `effort: 'high'`, and the reasoning draws on the same allowance.
  */
 const MAX_TOKENS = 2000;
 
@@ -55,13 +57,6 @@ export interface ModelClient {
   generate(request: StructuredRequest): Promise<unknown>;
 }
 
-export class AiNotConfiguredError extends Error {
-  constructor() {
-    super('ANTHROPIC_API_KEY is not set, so the AI half of this feature is unavailable.');
-    this.name = 'AiNotConfiguredError';
-  }
-}
-
 export class AiRefusalError extends Error {
   constructor(detail: string) {
     super(`The model declined to answer: ${detail}`);
@@ -69,16 +64,80 @@ export class AiRefusalError extends Error {
   }
 }
 
-/** Read per call, not at module load, so a key set after boot is still picked up. */
-export function isAiConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+/**
+ * The model answered; the answer is unusable.
+ *
+ * The third outcome, and the one callers most need to tell apart. `AiRefusalError`
+ * means the model declined and a transport failure means it could not be reached —
+ * both are "there was no answer", and a caller with nothing to fall back on should
+ * report an outage. This is "there was an answer and it was cut short or
+ * unparseable", which is a different thing: a caller holding a result the model only
+ * helped with can still serve it.
+ *
+ * The placement route is why this class exists rather than a bare `Error`. It scores
+ * the quiz before it ever calls the model, so a truncated *writing grade* has a
+ * complete placement sitting right next to it. With both failures reported as a plain
+ * `Error` the route could only classify by type, found no refusal, and reported an
+ * outage — handing back an error body with no level in it while the page told the
+ * learner their "quiz score is unaffected". One class carries the distinction.
+ *
+ * Deliberately not a subclass of `AiRefusalError`: routes branch on that type to
+ * decide the learner-facing code, and a grade cut off at `max_tokens` was not
+ * declined by anything.
+ */
+export class AiUnusableOutputError extends Error {
+  constructor(detail: string) {
+    super(detail);
+    this.name = 'AiUnusableOutputError';
+  }
+}
+
+/**
+ * The three codes an AI route can return, each with a distinct meaning to a learner.
+ *
+ * `ai_unavailable` in particular is a claim about the world — the service could not be
+ * reached — and a page that renders it sends the learner off to retry. So it must mean
+ * exactly that, and never absorb an outcome that is not an outage.
+ */
+export type AiFailureCode = 'ai_refusal' | 'invalid_model_output' | 'ai_unavailable';
+
+/**
+ * Map a thrown error to the code a route hands the client.
+ *
+ * Shared because the two routes that report a bare model failure — writing and tutor —
+ * must answer this identically, and because each had answered it with its own
+ * two-branch ternary. Both omitted `AiUnusableOutputError`, so an answer cut off at
+ * `max_tokens` was reported as an outage in one code and as a rejected schema in
+ * another, depending on which half of the split it arrived by. The pages already word
+ * `invalid_model_output` correctly ("The correction came back unusable"); the class
+ * was simply never consulted.
+ *
+ * Placement does not use this: it scores the quiz before calling the model, so an
+ * unusable grade is degraded away rather than reported. Only routes whose whole
+ * product *is* the model output reach for a code.
+ */
+export function aiFailureCode(error: unknown): AiFailureCode {
+  if (error instanceof AiRefusalError) return 'ai_refusal';
+  if (error instanceof AiUnusableOutputError) return 'invalid_model_output';
+  return 'ai_unavailable';
 }
 
 export function createModelClient(): ModelClient {
-  if (!isAiConfigured()) throw new AiNotConfiguredError();
-
-  // Zero-arg: the SDK also resolves an `ant auth login` profile, so a deploy
-  // without ANTHROPIC_API_KEY is not automatically a broken deploy.
+  // Zero-arg, and deliberately not guarded on ANTHROPIC_API_KEY.
+  //
+  // This used to open with `if (!isAiConfigured()) throw new AiNotConfiguredError()`,
+  // and all three routes checked the same predicate before calling in. But the SDK
+  // does not need the key: `new Anthropic()` never throws without one — it resolves
+  // the `ant auth login` credential chain on first *use* and surfaces a failure
+  // there. So the guard could not stop a call that was going to fail; it could only
+  // stop calls that would have succeeded, on any machine whose credential came from
+  // a profile. The comment it contradicted stood three lines below it the whole time.
+  //
+  // What that cost beyond the wasted capability is the reason it is worth recording:
+  // placement reads "no key" as "nothing to grade", so it silently discards a written
+  // essay and the page then tells the learner that was normal. A machine that truly
+  // cannot authenticate degrades to `ai_unavailable`, which is a claim about the world
+  // and has to mean it — that one is unreachable.
   const anthropic = new Anthropic();
 
   return {
@@ -126,14 +185,17 @@ export function createModelClient(): ModelClient {
       // 2000 characters — is what the reasoning spends them on. The learner controls
       // both, so they can drive this without doing anything wrong.
       //
-      // Deliberately a plain Error rather than an AiRefusalError, so it maps to
-      // `ai_unavailable` and the client says "try again" — the honest advice, since
-      // the learner's own text was fine and a retry may well fit.
+      // Deliberately not an AiRefusalError: `aiFailureCode` maps that to `ai_refusal`,
+      // and nothing declined anything here. The two routes whose whole product is the
+      // model output map it to `invalid_model_output` instead, which is what the pages
+      // already word correctly ("came back unusable"). No route hands this to a learner
+      // directly — the placement route, the only one holding a partial result, now
+      // degrades on every writing failure rather than reporting a code at all.
       if (message.stop_reason === 'max_tokens') {
-        throw new Error('Model output was truncated at max_tokens.');
+        throw new AiUnusableOutputError('Model output was truncated at max_tokens.');
       }
       if (message.parsed_output === null) {
-        throw new Error('Model returned no parsable output for the requested schema.');
+        throw new AiUnusableOutputError('Model returned no parsable output for the requested schema.');
       }
       return message.parsed_output;
     },

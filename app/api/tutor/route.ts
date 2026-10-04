@@ -1,4 +1,4 @@
-import { AiRefusalError, createModelClient, isAiConfigured } from '../../../lib/ai';
+import { aiFailureCode, createModelClient } from '../../../lib/ai';
 import {
   MAX_MESSAGE_CHARS,
   MAX_TURNS,
@@ -13,15 +13,19 @@ import {
  *
  *   GET  /api/tutor                      -> 200 { maxMessageChars, maxTurns }
  *   POST /api/tutor { history, message } -> 200 { reply }
- *                                           400 | 415 | 502 | 503
+ *                                           400 | 415 | 502
  *
  * The caps travel in the GET body for the same reason as /api/writing: the system
  * prompt lives in `lib/tutor.ts`, and a value import would pull all of it into the
  * browser bundle. The page takes the *type* it needs with `import type`.
  *
- * The request is validated before the key is checked, so a malformed history is
- * reported as the client's fault (400) rather than as a missing-key outage (503) —
- * the learner gets "that message was too long" instead of "no AI configured".
+ * The request is validated before the model is called, so a malformed history is
+ * reported as the client's fault (400, naming the offending turn) rather than as our
+ * outage. It has to be checked here and not left to the provider: every error that
+ * escapes `generate()` reaches the catch-all below, and `aiFailureCode` maps all of
+ * them to a 502 `ai_unavailable` — a claim about the world, which has to mean the model
+ * could not be reached. The learner would be told the tutor is down over a message
+ * they simply typed too long.
  */
 
 const json = (body: unknown, status: number) =>
@@ -51,10 +55,6 @@ export async function POST(request: Request) {
     return json({ error: 'invalid_payload', issues: parsed.issues }, 400);
   }
 
-  if (!isAiConfigured()) {
-    return json({ error: 'ai_not_configured' }, 503);
-  }
-
   try {
     const client = createModelClient();
     const output = await client.generate({
@@ -65,7 +65,14 @@ export async function POST(request: Request) {
       // A chat reply is prose, and unlike placement there is no short answer to
       // grade — so it asks for the same depth as writing correction.
       effort: 'high',
-      maxTokens: 2000,
+      // And the same ceiling, which is the half of that sentence this route was not
+      // honouring: it passed the classification default of 2000, leaving the caller
+      // with the most context on the smallest budget. At `effort: 'high'` the
+      // reasoning draws on the same allowance as the reply — see the `max_tokens`
+      // branch in lib/ai.ts, which names the tutor as the reachable case — and the
+      // learner supplies both halves of it, since twelve turns of up to 2000
+      // characters each is a great deal to think over.
+      maxTokens: 4000,
     });
 
     const checked = parseTutorReply(output);
@@ -75,6 +82,6 @@ export async function POST(request: Request) {
     return json({ reply: checked.value.reply }, 200);
   } catch (error) {
     console.error('[tutor] reply failed:', error);
-    return json({ error: error instanceof AiRefusalError ? 'ai_refusal' : 'ai_unavailable' }, 502);
+    return json({ error: aiFailureCode(error) }, 502);
   }
 }

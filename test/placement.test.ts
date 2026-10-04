@@ -8,6 +8,7 @@ import {
   PLACEMENT_LEVELS,
   PLACEMENT_QUESTIONS,
   WRITING_GRADE_SCHEMA,
+  WRITING_SYSTEM_PROMPT,
   buildWritingRequest,
   decideLevel,
   parsePlacementRequest,
@@ -189,6 +190,9 @@ describe('parseWritingGrade', () => {
     ['a band outside the tested range', { band: 'C1', rationale: 'x', corrections: [] }, 'band'],
     ['a missing band', { rationale: 'x', corrections: [] }, 'band'],
     ['an empty rationale', { band: 'A1', rationale: '', corrections: [] }, 'rationale'],
+    // The page renders this under the band, so a blank one draws a blank line next to
+    // a graded level. Same reasoning as `isBlank` in lib/writing.ts.
+    ['a rationale that is only whitespace', { band: 'A1', rationale: '   ', corrections: [] }, 'rationale'],
     ['a non-array corrections', { band: 'A1', rationale: 'x', corrections: 'none' }, 'corrections'],
     ['a non-string correction', { band: 'A1', rationale: 'x', corrections: [{ was: 'y' }] }, 'corrections'],
   ])('rejects %s', (_label, candidate, path) => {
@@ -202,32 +206,54 @@ describe('parseWritingGrade', () => {
     expect(parseWritingGrade(value).ok).toBe(false);
   });
 
-  it('caps an over-long rationale and an over-long correction', () => {
-    expect(
-      parseWritingGrade({
-        band: 'A1',
-        rationale: 'x'.repeat(MAX_RATIONALE_LENGTH + 1),
-        corrections: [],
-      }).ok,
-    ).toBe(false);
-    expect(
-      parseWritingGrade({
-        band: 'A1',
-        rationale: 'x',
-        corrections: ['y'.repeat(MAX_CORRECTION_LENGTH + 1)],
-      }).ok,
-    ).toBe(false);
+  /**
+   * Clipped, not rejected — same rule and same reason as lib/writing.ts. The parser used
+   * to return the whole grade as unusable over one long sentence, so a learner who
+   * answered the quiz well enough to sit a placement test was told the grader "came back
+   * unusable" over a rationale that was simply verbose. `parsePlacementRequest` still
+   * rejects an over-long submission; that is the client sending something wrong, not the
+   * model answering well.
+   */
+  it('clips an over-long rationale and an over-long correction, and keeps the band', () => {
+    const parsed = parseWritingGrade({
+      band: 'B1',
+      rationale: 'x'.repeat(MAX_RATIONALE_LENGTH + 1),
+      corrections: ['y'.repeat(MAX_CORRECTION_LENGTH + 1)],
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('unreachable');
+    expect(parsed.value.band).toBe('B1');
+    expect(parsed.value.rationale).toHaveLength(MAX_RATIONALE_LENGTH);
+    expect(parsed.value.rationale.endsWith('…')).toBe(true);
+    expect(parsed.value.corrections[0]).toHaveLength(MAX_CORRECTION_LENGTH);
+    expect(parsed.value.corrections[0].endsWith('…')).toBe(true);
   });
 
-  it('caps how many corrections it will accept', () => {
+  it('leaves a rationale and a correction exactly at their caps untouched', () => {
+    const rationale = 'x'.repeat(MAX_RATIONALE_LENGTH);
+    const correction = 'y'.repeat(MAX_CORRECTION_LENGTH);
+    const parsed = parseWritingGrade({ band: 'A2', rationale, corrections: [correction] });
+    expect(parsed).toEqual({ ok: true, value: { band: 'A2', rationale, corrections: [correction] } });
+  });
+
+  it('slices how many corrections it keeps, rather than discarding the grade', () => {
     const parsed = parseWritingGrade({
       band: 'A1',
       rationale: 'x',
-      corrections: Array.from({ length: MAX_CORRECTIONS + 1 }, () => 'a -> b'),
+      corrections: Array.from({ length: MAX_CORRECTIONS + 1 }, (_, i) => `a${i} -> b${i}`),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('unreachable');
+    expect(parsed.value.corrections).toHaveLength(MAX_CORRECTIONS);
+  });
+
+  it('still rejects a non-string correction past the cap, rather than slicing it away', () => {
+    const parsed = parseWritingGrade({
+      band: 'A1',
+      rationale: 'x',
+      corrections: [...Array.from({ length: MAX_CORRECTIONS }, () => 'a -> b'), 7],
     });
     expect(parsed.ok).toBe(false);
-    if (parsed.ok) throw new Error('unreachable');
-    expect(parsed.issues[0].path).toBe('corrections');
   });
 });
 
@@ -270,5 +296,54 @@ describe('parsePlacementRequest', () => {
 
   it.each(['null', 'an array', 'a string'])('refuses %s at the top level', (_l, value) => {
     expect(parsePlacementRequest(value).ok).toBe(false);
+  });
+});
+
+describe('the model is told every string ceiling the grader enforces', () => {
+  /**
+   * The prompt is the only channel that can hold the model to a ceiling: structured
+   * outputs support neither array nor string constraints, so `maxLength` would be
+   * stripped by the SDK and constrain nothing while appearing to.
+   *
+   * These two are interpolated from the constants, so the number the model is given and
+   * the number the parser uses cannot drift apart. MAX_CORRECTIONS is communicated by
+   * hand at five, below the cap of eight, and that gap is deliberate — it is where an
+   * imprecise count lands instead of losing a correction the learner needed.
+   *
+   * What is left to test is that the paragraph survives, and that it still describes
+   * what over-length actually does. It used to promise the opposite: "going over either
+   * one costs the whole grade — the rationale and every correction". `parseWritingGrade`
+   * stopped doing that when `clip` replaced the rejection, and the prompt was never
+   * updated to match. A model told a wrong consequence is not merely misinformed — under
+   * a threat of losing everything the cheapest way out is to answer with less, and a
+   * shortened rationale is a weaker grade than the learner's essay actually earned.
+   */
+  const statedCeilings = () =>
+    WRITING_SYSTEM_PROMPT.split('\n\n').find((p) => p.startsWith('Length limits')) ?? '';
+
+  it('names both, in a paragraph of its own', () => {
+    const stated = statedCeilings();
+
+    // Empty means the paragraph was deleted, and the loop below would then pass for a
+    // prompt that tells the model nothing at all.
+    expect(stated).not.toBe('');
+    expect(stated).toContain(String(MAX_RATIONALE_LENGTH));
+    expect(stated).toContain(String(MAX_CORRECTION_LENGTH));
+  });
+
+  it('describes the consequence the parser actually has', () => {
+    const stated = statedCeilings();
+
+    expect(stated).toMatch(/trimmed/i);
+    expect(stated).not.toMatch(/costs the whole|whole grade/i);
+  });
+
+  it('still states the corrections count by hand, below the cap', () => {
+    const stated = WRITING_SYSTEM_PROMPT.match(/no more than\s+(\w+)/i)?.[1];
+
+    // Not a digit: the count is written out, and "below the cap" is the point — the
+    // gap is where an imprecise count lands instead of losing the whole grade.
+    expect(Number(MAX_CORRECTIONS)).toBeGreaterThan(5);
+    expect(stated).toBe('five');
   });
 });

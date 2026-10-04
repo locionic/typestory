@@ -8,8 +8,6 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +20,54 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/*
+ * Reduced motion, honoured rather than documented.
+ *
+ * Eight animations run in this app, and the loudest one never stops: the typing caret's
+ * `animate-pulse` is a 2s infinite loop that restarts for as long as the board is open,
+ * sitting in the middle of the learner's field of view for the whole of every run. One more
+ * pulses the word bank's loader, and six are `animate-spin` loaders.
+ *
+ * It said ten, and named two of them as `animate-fadeIn`. That class was on the completion
+ * card and on the stats modal's backdrop, and it defined nothing: Tailwind ships four
+ * animations — bounce, ping, pulse, spin — and `fadeIn` was not one of them, with no
+ * `@keyframes` for it anywhere in the app. So the two elements were carrying a class that
+ * generated no rule, and this block was credited with silencing animations that had never
+ * run. It is now eight, and the class is gone from both; every `animate-*` in the app is
+ * checked against the theme's own `--animate-*` keys in `test/globalStyles.test.ts`, so the
+ * next one cannot be a name nobody defined.
+ *
+ * `prefers-reduced-motion` is the accommodation for exactly that, and this stylesheet
+ * already honours `prefers-color-scheme` four lines above. It was absent, so a learner who
+ * had asked their operating system to stop movement got every bit of it anyway.
+ *
+ * The `!important` is required, not decorative: Tailwind puts the `animate-*` declaration
+ * on the element itself, and a `*` selector has no specificity to beat it with.
+ * `animation-iteration-count` is the load-bearing half — a duration of `0.01ms` still
+ * repeats forever, so a rule setting only the duration would silence the completion card and
+ * leave the caret pulsing beside every word being typed.
+ *
+ * `scroll-behavior` is here for two things this app actually does, both of which are
+ * animation a learner cannot switch off from inside the page. `<html>` carries
+ * `scroll-smooth`, so every scroll that moves the viewport glides — including the one the
+ * browser makes on your behalf when Tab moves focus to something off-screen. And
+ * app/tutor/page.tsx:72 calls `scrollIntoView` on every reply the tutor sends, which under
+ * `scroll-smooth` is a full-screen glide on every turn of the conversation. That one needs
+ * no change where it is called: a `scrollIntoView()` with no explicit `behavior` reads the
+ * element's computed `scroll-behavior`, so this line is what turns it off.
+ *
+ * Confetti is deliberately absent, because it is JS and no stylesheet reaches it: it is
+ * gated at the call site in components/typing/TypingEngine.tsx, the only place it fires.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type Engine = typeof import('../lib/audio')['soundEngine'];
 type SoundType = import('../lib/types').SwitchSound;
@@ -53,6 +55,28 @@ class FakeAudioContext {
 class BlockedAudioContext extends FakeAudioContext {
   createOscillator(): never {
     throw new DOMException('Audio blocked by policy', 'NotAllowedError');
+  }
+}
+
+/**
+ * A browser that has no audio context to be had, rather than one that refuses to make sound.
+ *
+ * The distinction is the whole of this fake. `BlockedAudioContext` throws from
+ * `createOscillator`, which both entry points call *inside* the `try` that wraps their graph,
+ * so it is swallowed — and it is exactly the case that swallowing is for. This one throws from
+ * the constructor, which both entry points call before reaching any `try`, so it was not
+ * covered by anything.
+ *
+ * The cost was not a silent sound. `store/useTypingStore.ts` calls `playKeyClick` from
+ * `handleKeyInput` with no guard of its own, so the exception unwound out of a keystroke
+ * before the character was compared and recorded — the learner's key did nothing. It threw
+ * again on the next one and the next, so the board was dead for the rest of the session, with
+ * nothing on screen saying so: the run looked live and recorded nothing.
+ */
+class UnconstructableAudioContext extends FakeAudioContext {
+  constructor() {
+    super();
+    throw new DOMException('No audio device available', 'NotSupportedError');
   }
 }
 
@@ -138,15 +162,29 @@ describe('mute', () => {
     expect(FakeAudioContext.instances).toHaveLength(0);
   });
 
-  // Asymmetry pinned on purpose: playKeyClick guards on 'mute' (lib/audio.ts:31) but
-  // playSuccessChime does not, so the completion reward still plays. Flip this test
-  // if the product decision changes — it is a behaviour choice, not an oversight.
-  it('still plays the completion chime', () => {
+  /**
+   * The completion chime, which used to be exempt.
+   *
+   * This asymmetry was pinned on purpose as "a behaviour choice, not an oversight", and
+   * the reasoning was that a lesson-ender is worth hearing even over a muted keyboard.
+   * But the option is labelled "Mute" and nothing else, so the promise it makes is not
+   * "quiet keys" — it is silence. And the reason the setting is worth having at all is
+   * named three files away, in the store: "someone practising in a library or on a
+   * train". A four-note arpeggio on a train is the one that gets you looked at.
+   *
+   * What the exemption costs is nothing. Finishing a passage already puts a card on
+   * screen with the WPM, accuracy and time, so the chime is a second signal for an event
+   * that already has a first one — it was redundancy, and redundancy is what a mute
+   * button is for.
+   *
+   * The check is on the context, not the oscillators, to match the test above: the point
+   * is that nothing is built at all.
+   */
+  it('suppresses the completion chime as well', () => {
     engine.setSoundType('mute');
     engine.playSuccessChime();
 
-    expect(FakeAudioContext.instances).toHaveLength(1);
-    expect(FakeAudioContext.instances[0].oscillators).toHaveLength(4);
+    expect(FakeAudioContext.instances).toHaveLength(0);
   });
 });
 
@@ -168,6 +206,44 @@ describe('hostile audio environments', () => {
     install(BlockedAudioContext);
     expect(() => engine.playKeyClick()).not.toThrow();
     expect(() => engine.playSuccessChime()).not.toThrow();
+  });
+
+  /**
+   * The control for the two above, and the reason they are two tests. All three describe a
+   * browser that will not make a sound; only this one has no audio to make one with. Every
+   * one of them answers the same question, so a single "stays silent" test would pass against
+   * an engine that threw on construction for the rest of the session.
+   */
+  it('stays silent when there is no audio context to be had at all', () => {
+    install(UnconstructableAudioContext);
+    expect(() => engine.playKeyClick()).not.toThrow();
+    expect(() => engine.playSuccessChime()).not.toThrow();
+  });
+
+  /**
+   * And it has to stay silent *permanently* — the failure must not latch.
+   *
+   * A `try` that assigned `null` to the cached context, or that set a "broken" flag the next
+   * call read, would silence every click from here on in even after the browser recovered. The
+   * counter is what says the engine kept asking: two calls, two attempts to construct.
+   */
+  it('keeps asking, so a context that becomes available later still plays', () => {
+    let attempts = 0;
+    install(
+      class extends FakeAudioContext {
+        constructor() {
+          super();
+          attempts++;
+          if (attempts === 1) throw new DOMException('Not yet', 'NotSupportedError');
+        }
+      },
+    );
+
+    expect(() => engine.playKeyClick()).not.toThrow();
+    expect(() => engine.playKeyClick()).not.toThrow();
+
+    expect(attempts).toBe(2);
+    expect(FakeAudioContext.instances.length).toBeGreaterThan(0);
   });
 
   it('falls back to webkitAudioContext when the standard name is missing', () => {
@@ -274,5 +350,48 @@ describe('speech synthesis', () => {
     engine.speak('first');
     engine.speak('second');
     expect(api.cancel).toHaveBeenCalledTimes(2);
+  });
+});
+/**
+ * The surfaces the wordmark claims, held to the code.
+ *
+ * "Type & Speak English" is rendered by the Navbar on all ten routes and by the social card
+ * on every shared link, and `lib/site.ts` is the one place that has to answer whether that is
+ * backed. Its answer is a list of surfaces — and that list had the tutor on it, a page that
+ * reaches `soundEngine` nowhere at all. Nothing caught it, because the speech engine above is
+ * pinned thoroughly and *no control reaching it was pinned at all*: delete the Listen button
+ * from the board and this suite stayed green over a promise nothing kept.
+ *
+ * So this is the check that closes it, and it asserts the exact set rather than a count — a
+ * fourth surface has to be added here deliberately, and one that goes away is noticed. The
+ * three are the vocabulary drill, the story glossary and the board's Listen button, which is
+ * what `lib/site.ts` now says.
+ *
+ * Matched on the whole call, not on the word "speak", which also turns up in prose — "a
+ * fluent speaker" on /writing, "a status region only speaks" on the board — so this needs no
+ * comment stripper to tell code from English the way `test/shareMetadata.test.ts` does.
+ */
+describe('the surfaces the wordmark claims', () => {
+  it('are exactly the ones that reach soundEngine.speak', () => {
+    const callers: string[] = [];
+
+    for (const dir of ['app', 'components']) {
+      for (const entry of readdirSync(join(process.cwd(), dir), {
+        recursive: true,
+        encoding: 'utf8',
+      })) {
+        if (!/\.tsx?$/.test(entry)) continue;
+        const path = `${dir}/${entry}`;
+        if (readFileSync(join(process.cwd(), path), 'utf8').includes('soundEngine.speak(')) {
+          callers.push(path);
+        }
+      }
+    }
+
+    expect(callers.sort()).toEqual([
+      'app/vocab/page.tsx',
+      'components/typing/StoryReader.tsx',
+      'components/typing/TypingEngine.tsx',
+    ]);
   });
 });

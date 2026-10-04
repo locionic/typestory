@@ -16,6 +16,7 @@ const stats = (bestWpm: number): UserStats => ({
   bestWpm,
   averageWpm: bestWpm,
   averageAccuracy: 100,
+  bestAccuracy: 100,
 });
 
 const record = (bestWpm: number): ProgressRecord => ({
@@ -127,5 +128,31 @@ describe('the device id becomes a filename, so it is re-checked here', () => {
       store.put({ ...record(51), deviceId: deviceId as string }),
     ).rejects.toBeInstanceOf(UnsafeDeviceIdError);
     await expect(store.get(deviceId as string)).rejects.toBeInstanceOf(UnsafeDeviceIdError);
+    // All three, and `remove` was the one that was missing. It goes through the same
+    // `fileFor`, so it does hold — but nothing said so, and it is the one to say it for:
+    // the other two lose a read or overwrite a record, and this one deletes whatever the
+    // path names, which is the strictly worse outcome for the guard to have lost.
+    await expect(store.remove(deviceId as string)).rejects.toBeInstanceOf(UnsafeDeviceIdError);
+  });
+
+  /**
+   * The structural version, and the reason the three above are not just an enumeration
+   * that stops where the last one did.
+   *
+   * The guard lives in `fileFor`, which every method that touches the filesystem routes
+   * through — so it cannot be forgotten without bypassing that helper outright. This
+   * asserts the helper is still the only path: a fourth public method added later has to
+   * appear in this list, which is what stops it appearing here without the guard.
+   *
+   * `fileFor` itself is named in the exclusion because it is `private` in TypeScript and
+   * present at runtime — it throws synchronously rather than rejecting, so folding it
+   * into the three above would assert a contract none of them have.
+   */
+  it('holds on every method that turns an id into a path', () => {
+    const declared = Object.getOwnPropertyNames(FileProgressStore.prototype)
+      .filter((name) => name !== 'constructor' && name !== 'fileFor')
+      .sort();
+
+    expect(declared).toEqual(['get', 'put', 'remove']);
   });
 });

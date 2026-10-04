@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AiRefusalError, createModelClient, isAiConfigured } from '../lib/ai';
+import {
+  AiRefusalError,
+  AiUnusableOutputError,
+  aiFailureCode,
+  createModelClient,
+} from '../lib/ai';
 
 // lib/ai.ts is the only module that touches the SDK, and every other suite mocks
 // this seam away — so the request it actually builds was untested. The route tests
@@ -22,14 +27,18 @@ beforeEach(() => {
   vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
 });
 
-describe('isAiConfigured', () => {
-  it('follows the environment rather than the module load', () => {
-    // A key added after boot must still be picked up, or a deploy that injects one
-    // late looks permanently unconfigured.
+describe('createModelClient', () => {
+  it('does not require an API key to be built', () => {
+    // This replaced a guard that threw `AiNotConfiguredError` right here, and that
+    // three routes also ran as a pre-check before calling in. The SDK never needed
+    // the key: `new Anthropic()` resolves an `ant auth login` credential chain on
+    // first use. So the guard could not have prevented a call that was going to
+    // fail — it could only have refused machines whose credential was not an env
+    // var, which is the one case that would have worked. A machine that truly
+    // cannot authenticate fails at `generate()`, where the routes already handle
+    // it, so the capability lost nothing that the guard was protecting.
     vi.stubEnv('ANTHROPIC_API_KEY', '');
-    expect(isAiConfigured()).toBe(false);
-    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
-    expect(isAiConfigured()).toBe(true);
+    expect(() => createModelClient()).not.toThrow();
   });
 });
 
@@ -88,6 +97,16 @@ describe('ModelClient.generate', () => {
     await expect(
       createModelClient().generate({ system: 'sys', user: 'text', schema: SCHEMA }),
     ).rejects.toThrow(/no parsable output/);
+
+    // A well-formed response the SDK could not turn into the requested schema is the
+    // same "the model answered, the answer is unusable" as a truncation, and the
+    // placement route degrades on it for the same reason. Asserted here because this
+    // is the only suite that sees what `lib/ai.ts` throws — the route suites mock
+    // this module and hand the route a constructed error, so a regression to a bare
+    // Error would 502 a placement again with the whole suite still green.
+    await expect(
+      createModelClient().generate({ system: 'sys', user: 'text', schema: SCHEMA }),
+    ).rejects.toBeInstanceOf(AiUnusableOutputError);
   });
 
   /**
@@ -108,9 +127,19 @@ describe('ModelClient.generate', () => {
    * it. So the reply competes with the reasoning for the same 2000-4000 tokens, and
    * the learner controls how much history the tutor reasons over.
    *
-   * A plain Error, not `AiRefusalError`: the route maps that to `ai_unavailable`,
-   * which the client already renders as "try again" — the honest advice, since
-   * nothing is wrong with the learner's text and a retry may well fit.
+   * `AiUnusableOutputError`, not `AiRefusalError`: the refusal code tells the learner
+   * the model declined their question, which is a different and untrue thing to say
+   * about a reply that ran out of room. Routes branch on the type, and the tutor and
+   * writing routes — which have no partial result to fall back on — map anything that
+   * is not a refusal to `ai_unavailable`, which the client already renders as "try
+   * again". The placement route uses it to keep the placement its quiz already
+   * decided, instead of discarding a scored test over an optional writing sample.
+   *
+   * The class is asserted here, not just the message, because this is the only place
+   * that sees what `lib/ai.ts` actually throws. The route suites mock this module
+   * wholesale and hand the route a constructed error, so nothing else would notice
+   * this going back to a bare `Error` — the placement route would silently 502 a
+   * truncated grade again and the whole suite would stay green.
    */
   it('refuses a reply cut off at max_tokens rather than serving half of it', async () => {
     parse.mockResolvedValue({
@@ -120,9 +149,50 @@ describe('ModelClient.generate', () => {
 
     const failure = createModelClient().generate({ system: 'sys', user: 'text', schema: SCHEMA });
 
+    await expect(failure).rejects.toBeInstanceOf(AiUnusableOutputError);
     await expect(failure).rejects.toThrow(/truncated/);
     // It must not borrow the refusal's error type: that code tells the learner the
     // model declined their question, which is a different and untrue thing to say.
     await expect(failure).rejects.not.toBeInstanceOf(AiRefusalError);
+  });
+});
+
+describe('aiFailureCode', () => {
+  /**
+   * The mapper is the only place the three outcomes become three different sentences
+   * on the page, and every route suite mocks this module wholesale — so `lib/ai.ts` is
+   * the *only* place its behaviour is observable. Tested here for the same reason the
+   * class is asserted above: a regression here would leave all four route suites green
+   * while a truncated correction told the learner the service was unreachable.
+   *
+   * The middle case is the one that was wrong. `ai_unavailable` is a claim about the
+   * world — the page renders it as "not reachable right now. Please try again." — and
+   * an answer cut off at `max_tokens` is not that: the service answered and the reply
+   * was cut short. `invalid_model_output` already exists on both pages and is already
+   * worded correctly ("The correction came back unusable.").
+   */
+  it('tells an unusable answer apart from a refusal and from an outage', () => {
+    expect(aiFailureCode(new AiRefusalError('declined'))).toBe('ai_refusal');
+    expect(aiFailureCode(new AiUnusableOutputError('truncated at max_tokens'))).toBe(
+      'invalid_model_output',
+    );
+  });
+
+  it.each([
+    ['a transport failure', new Error('socket hang up')],
+    // What a keyless machine produces now that the guard no longer short-circuits:
+    // the SDK's own credential-chain failure, raised on first use rather than here.
+    ['an unresolvable credential', new Error('Could not resolve auth credentials')],
+    ['a non-Error throw', 'nope'],
+    ['undefined', undefined],
+  ])('reports %s as an outage, since nothing about it is a model answer', (_label, thrown) => {
+    expect(aiFailureCode(thrown)).toBe('ai_unavailable');
+  });
+
+  it('orders the check so a refusal is never mistaken for unusable output', () => {
+    // The order is load-bearing: a class that subclassed the other would make the two
+    // codes swap. Neither does today, and this is the assertion that keeps it true.
+    expect(aiFailureCode(new AiUnusableOutputError('x'))).not.toBe('ai_refusal');
+    expect(aiFailureCode(new AiRefusalError('x'))).not.toBe('invalid_model_output');
   });
 });

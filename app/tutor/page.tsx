@@ -17,8 +17,6 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_model_output: 'The reply came back unusable. Please try again.',
   ai_refusal: 'The model declined to answer that. Try asking about English instead.',
   ai_unavailable: 'The tutor is not reachable right now. Please try again.',
-  ai_not_configured:
-    'This instance has no ANTHROPIC_API_KEY set, so there is no tutor to talk to. Everything else in TypeStory works without one.',
 };
 
 const STARTERS = [
@@ -49,6 +47,15 @@ export function trimHistory(turns: TutorMessage[], maxTurns: number): TutorMessa
   const keep = maxTurns - (maxTurns % 2);
   return turns.length <= keep ? turns : turns.slice(turns.length - keep);
 }
+
+/**
+ * The page's name, in both of the states the page has.
+ *
+ * One constant rather than the same string written twice, because the two must not drift:
+ * the loading state exists to name the page, and it stops doing that the moment the two
+ * copies disagree.
+ */
+const HEADING = 'Ask about anything in English';
 
 export default function TutorPage() {
   const [bundle, setBundle] = useState<Bundle | null>(null);
@@ -83,8 +90,6 @@ export default function TutorPage() {
       cancelled = true;
     };
   }, []);
-
-  const overCap = bundle !== null && draft.length > bundle.maxMessageChars;
 
   const send = async (text: string) => {
     if (!bundle || submitting) return;
@@ -131,18 +136,63 @@ export default function TutorPage() {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 text-center sm:px-6">
         <AlertCircle className="mx-auto h-8 w-8 text-red-500" />
-        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">{loadError}</p>
+        {/* `role="alert"`, for the same reason as the question's own failure below: this is
+            the whole result of arriving here, and nothing else renders. It is the worse of
+            the two, because this branch replaces the page rather than joining it — a screen
+            reader user is left in silence on a page with no question box to try again on,
+            with no way to tell it from one that never loaded. Pinned in
+            test/loadErrors.test.ts. */}
+        <p
+          role="alert"
+          className="mt-3 text-sm text-gray-600 dark:text-gray-400"
+        >
+          {loadError}
+        </p>
       </div>
     );
   }
 
   if (!bundle) {
+    // The heading belongs to the page, not to the bundle, so it does not wait for it.
+    //
+    // This used to return the spinner and nothing else, which made the entire document a
+    // picture: no heading, no landmark, no text. That is what a screen reader arrives on,
+    // so the learner was told neither that the tutor was loading nor what page they were
+    // on, and a keyboard user tabbing straight away landed on nothing. It also meant the
+    // heading appeared from nowhere once the fetch landed.
     return (
-      <div className="mx-auto flex max-w-3xl items-center justify-center px-4 py-24 sm:px-6">
-        <Loader2 className="h-6 w-6 animate-spin text-indigo-500" aria-label="Loading" />
+      <div className="mx-auto max-w-3xl px-4 py-8 text-center sm:px-6 sm:py-12">
+        <h1 className="text-3xl font-black text-gray-900 sm:text-4xl dark:text-white">
+          {HEADING}
+        </h1>
+        <div className="mt-8 flex justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-indigo-500" role="status" aria-label="Loading" />
+        </div>
       </div>
     );
   }
+
+  // The window the tutor actually has, for the sentence under the heading.
+  //
+  // The copy said "the tutor keeps the conversation", which is true of the transcript on
+  // screen and false of the one the model reads: `trimHistory` keeps the most recent
+  // `maxTurns` turns, so from the seventh question on the tutor has forgotten the first.
+  // A learner scrolling back through their own record, asking a follow-up to something at
+  // the top, was told their follow-ups worked.
+  //
+  // A question is a user→assistant pair, so the turns divide by two — the same pairing
+  // `trimHistory` drops whole. Understated by one on the turn a question is asked, since
+  // the question in hand is answered rather than remembered, which is the safe direction.
+  //
+  // The sentence above now says "in this session", which is the other half of what this
+  // number is. The transcript is `useState([])` and is written nowhere else — no store, no
+  // localStorage, no backup — so this window ends at the page: a reload or a return
+  // tomorrow, and the tutor remembers none of it. It said the same thing either way, which
+  // is a promise to exactly the learner who had already been taught to expect persistence
+  // by the stats, the streak, the placement result and the backup. Stating the scope is
+  // cheaper than persisting the conversation and does not pretend to; that would be a
+  // feature, not a sentence.
+  const rememberedQuestions = Math.floor(bundle.maxTurns / 2);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
@@ -152,11 +202,13 @@ export default function TutorPage() {
           <span>English Tutor</span>
         </div>
         <h1 className="text-3xl font-black text-gray-900 sm:text-4xl dark:text-white">
-          Ask about anything in English
+          {HEADING}
         </h1>
         <p className="mx-auto mt-2 max-w-xl text-sm text-gray-500 dark:text-gray-400">
           Ask about grammar, a phrase that did not sound right, or why something is wrong. The
-          tutor keeps the conversation, so follow-ups work.
+          tutor remembers your last {rememberedQuestions} questions in this session, so
+          follow-ups work; anything older stays on screen but is no longer part of the
+          conversation.
         </p>
       </div>
 
@@ -215,7 +267,16 @@ export default function TutorPage() {
         )}
 
         {submitError && (
-          <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+          // `role="alert"`, because this is the whole result of the action and nothing
+          // else moves to say so. On a failure the transcript is reverted too, so the DOM
+          // around the form is unchanged — a screen reader user pressing Enter was told
+          // nothing at all, for the three distinct sentences the route went to the trouble
+          // of writing. Assertive rather than polite, which is what `role="status"` would
+          // give: the learner asked a question and is waiting on the answer to that.
+          <p
+            role="alert"
+            className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+          >
             {submitError}
           </p>
         )}
@@ -224,7 +285,14 @@ export default function TutorPage() {
           onSubmit={(event) => {
             event.preventDefault();
             const text = draft.trim();
-            if (!text || overCap) return;
+            // `submitting` in the same condition as the empty check, because clearing the
+            // box is what this handler does before it hands the question over — and `send`
+            // returns immediately when a request is already open. Clearing it anyway
+            // destroyed a question the learner had finished composing, with nothing sent
+            // and nothing said. The Ask button beside the box is `disabled={submitting}`,
+            // which is why the form was thought covered; the box is not disabled, because
+            // composing the next question while the tutor answers is worth allowing.
+            if (!text || submitting) return;
             setDraft('');
             void send(text);
           }}
@@ -237,6 +305,14 @@ export default function TutorPage() {
             id="tutor-message"
             rows={2}
             value={draft}
+            // The character cap is enforced here and nowhere else on this side. The page
+            // also computed `draft.length > maxMessageChars` and used it to block both
+            // send paths, grey out the button and print "That is over the N character
+            // limit" — none of which could ever run, because `maxlength` stops the
+            // keystroke and `setDraft` has no other caller. A guard that cannot fail reads
+            // as one that holds, and the string is the kind of thing a maintainer keeps
+            // rather than re-derives. The server still refuses an over-long turn for any
+            // other client.
             maxLength={bundle.maxMessageChars}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -245,7 +321,11 @@ export default function TutorPage() {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 const text = draft.trim();
-                if (!text || overCap) return;
+                // The form above, and for the same reason — see there. This is the path that
+                // mattered: Enter is how the box is submitted, and the box is not disabled
+                // while the tutor answers, so a learner who pressed it a moment too early
+                // watched their question vanish rather than queue.
+                if (!text || submitting) return;
                 setDraft('');
                 void send(text);
               }
@@ -256,11 +336,11 @@ export default function TutorPage() {
           <div className="flex gap-2 sm:flex-col-reverse sm:justify-end">
             <button
               type="submit"
-              disabled={submitting || draft.trim().length === 0 || overCap}
+              disabled={submitting || draft.trim().length === 0}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none"
             >
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-label="Sending" />
+                <Loader2 className="h-4 w-4 animate-spin" role="status" aria-label="Sending" />
               ) : (
                 <SendHorizonal className="h-4 w-4" />
               )}
@@ -284,9 +364,7 @@ export default function TutorPage() {
         </form>
 
         <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-          {overCap
-            ? `That is over the ${bundle.maxMessageChars.toLocaleString()} character limit.`
-            : 'Enter to send · Shift+Enter for a new line'}
+          Enter to send · Shift+Enter for a new line
         </p>
       </div>
     </div>

@@ -1,7 +1,18 @@
 import { VocabItem } from '../lib/types';
 
 export interface VocabCategory {
-  id: string;
+  /**
+   * The bank's identity, and the only one it has.
+   *
+   * There was an `id` beside this, read in two places in `app/vocab/page.tsx` — the tab
+   * highlight's equality check and the React key — while `slug` was used for the key on
+   * `VocabDrill` and for every URL pointing at the bank. One list, two identities, and
+   * they had already drifted: the Oxford bank's `id` was `'oxford-3000'` and its `slug`
+   * was `'oxford-essential'`. Nothing was broken by it, which is exactly why it survived;
+   * both sets were unique, so every comparison still resolved. The next bank added by
+   * copying an existing one would have had to keep two fields in step by hand, with
+   * nothing to say so.
+   */
   slug: string;
   title: string;
   description: string;
@@ -12,7 +23,6 @@ export interface VocabCategory {
 
 export const VOCAB_BANKS: VocabCategory[] = [
   {
-    id: 'fullstack-cloud-engineering',
     slug: 'fullstack-cloud-engineering',
     title: 'Full-Stack, RAG & Cloud Terminology',
     description: 'Master technical terminology and system architecture vocabulary used by modern full-stack and cloud engineers.',
@@ -86,7 +96,6 @@ export const VOCAB_BANKS: VocabCategory[] = [
     ],
   },
   {
-    id: 'oxford-3000',
     slug: 'oxford-essential',
     title: 'Oxford 3000 Essentials',
     description: 'The core English vocabulary every fluent speaker needs for everyday conversations and reading.',
@@ -160,10 +169,9 @@ export const VOCAB_BANKS: VocabCategory[] = [
     ],
   },
   {
-    id: 'ielts-academic',
     slug: 'ielts-academic',
     title: 'IELTS Academic Vocabulary',
-    description: 'High-scoring academic collocations and abstract nouns for IELTS Band 7.5+ writing and speaking.',
+    description: 'High-scoring academic verbs and adjectives for IELTS Band 7.5+ writing and speaking.',
     badge: 'Exam Prep',
     iconEmoji: '🎓',
     words: [
@@ -210,7 +218,6 @@ export const VOCAB_BANKS: VocabCategory[] = [
     ],
   },
   {
-    id: 'tech-developer',
     slug: 'tech-developer',
     title: 'Developer & Tech English',
     description: 'Essential terminology for software engineers, code reviews, documentation, and technical interviews.',

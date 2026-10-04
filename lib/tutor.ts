@@ -146,11 +146,29 @@ export function parseTutorRequest(body: unknown): TutorRequestResult {
     issues.push({ path: 'history', message: 'expected the history to start with a user turn' });
   }
 
+  // ...and it must therefore close on an assistant turn, which the loop below never gets
+  // to check. `generate()` appends the current turn to the history rather than replacing
+  // it — `[...history, { role: 'user' }]` — so the array the API sees is one turn longer
+  // than this one and always ends on the learner. The loop compares `history[i]` with
+  // `history[i - 1]` from index 1, which checks every pair *inside* the history and stops
+  // one pair short of the seam: an odd length ending on `user` passed every rule above,
+  // reached generate(), and went to the provider as two learner turns running. That comes
+  // back a 400, falls through the route's catch-all, and is answered `502 ai_unavailable`
+  // — a caller's malformed history reported as our outage, which is precisely what the
+  // in-history check below was added for, one turn further on than where it stops.
+  const lastTurn = history[history.length - 1];
+  if (lastTurn && lastTurn.role !== 'assistant') {
+    issues.push({
+      path: `history[${history.length - 1}]`,
+      message: 'expected the history to end with an assistant turn',
+    });
+  }
+
   // The API rejects a conversation that does not alternate either, and that check was
   // missing here — so such a history passed validation, reached generate(), came back
   // from the provider as a 400, and fell into the route's catch-all as
   // `502 ai_unavailable`. The learner's own malformed history, reported as our outage.
-  // This is the other half of the rule the line above already enforces, in the same
+  // This is the other half of the rule the starts-with-a-user check already enforces, in the same
   // place, for the same reason: lib/ai.ts states both constraints and enforces neither.
   history.forEach((turn, index) => {
     if (index > 0 && turn.role === history[index - 1].role) {
@@ -181,6 +199,23 @@ export type TutorReplyResult =
   | { ok: false; issues: ValidationIssue[] };
 
 /**
+ * Clip an over-long model string to its cap, marked as clipped.
+ *
+ * A copy of `clip` in lib/writing.ts rather than an import. This used to send the reader
+ * there for the reason and find none — lib/writing.ts notes only that the three clip the
+ * same way, which is why clipping, not why copying. The reason is in lib/placement.ts:
+ * the three model-output parsers each carry their own `isObject`, and a shared module for
+ * a two-line pure function is not worth the coupling.
+ *
+ * It keeps the property the docstring on `parseTutorReply` depends on — nothing longer
+ * than MAX_REPLY_CHARS reaches the transcript or the next request's history — while
+ * letting the learner keep the first two thousand characters of an answer that had
+ * something useful in it. Rejecting instead discarded the whole reply.
+ */
+const clip = (value: string, max: number) =>
+  value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+
+/**
  * Model output is untrusted input. output_config.format makes it schema-shaped, not
  * correct, and this string is rendered straight into the transcript and re-posted as
  * history on the next turn — so the cap is the only thing standing between a rambling
@@ -195,10 +230,8 @@ export function parseTutorReply(raw: unknown): TutorReplyResult {
 
   if (typeof raw.reply !== 'string' || raw.reply.trim().length === 0) {
     issues.push({ path: 'reply', message: 'expected a non-empty string' });
-  } else if (raw.reply.length > MAX_REPLY_CHARS) {
-    issues.push({ path: 'reply', message: `expected at most ${MAX_REPLY_CHARS} characters` });
   }
 
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, value: raw as unknown as TutorReply };
+  return { ok: true, value: { reply: clip(raw.reply as string, MAX_REPLY_CHARS) } };
 }

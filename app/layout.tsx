@@ -2,12 +2,39 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import './globals.css';
 import Navbar from '../components/Navbar';
+import { NAV_ROUTES } from '../lib/routes';
+import { SITE_URL, TWITTER_CARD } from '../lib/site';
+
+/**
+ * The title and description, once.
+ *
+ * `title` and `description` were each written out three times in the object below — once
+ * for the SERP and once each for the OpenGraph and Twitter cards. Three copies of one
+ * sentence is three chances to edit one and forget the others, and it had already happened:
+ * the description drifted apart between the SERP ("Master touch typing…") and the social
+ * cards ("Practice touch typing…"), so what a search result promised and what a shared
+ * link promised were different sentences about the same product. One const each, read
+ * three times, cannot drift.
+ */
+const TITLE = 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary';
+
+/**
+ * "Oxford 3000" is a published word list of roughly three thousand words, and all three
+ * copies of this description offered it as something the site contains. The bank is drawn
+ * from that list — it is titled "Oxford 3000 Essentials" and its eight words are core
+ * A1/A2 vocabulary from it — but eight is not three thousand, and the home page says so
+ * plainly one screen away, in "{bank.words.length} core words" on the vocab card. Not by
+ * line number: that reference was already stale once, and it is the one part of this
+ * comment that could not survive an edit. The list is still worth naming — it is what the
+ * bank is actually taken from, and it is what people searching for it are looking for.
+ */
+const DESCRIPTION =
+  'Master touch typing, expand English vocabulary, and build muscle memory with real-world stories, a curated core set drawn from the Oxford 3000, and full-stack software engineering concepts.';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://typestory.app'),
-  title: 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary',
-  description:
-    'Master touch typing, expand English vocabulary, and build muscle memory with real-world stories, Oxford 3000 words, and full-stack software engineering concepts.',
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
   keywords: [
     'learn english by typing',
     'touch typing english',
@@ -20,16 +47,26 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: 'TypeStory Team' }],
   openGraph: {
-    title: 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary',
-    description:
-      'Practice touch typing while absorbing rich English stories, Oxford 3000 vocabulary, and full-stack engineering architecture concepts.',
+    title: TITLE,
+    description: DESCRIPTION,
     type: 'website',
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'TypeStory: Master Touch Typing with Real Stories & Technical Vocabulary',
-    description:
-      'Practice touch typing while absorbing rich English stories, Oxford 3000 vocabulary, and full-stack engineering architecture concepts.',
+    /* The large-image card, which is a promise of a 2:1 picture beside the text.
+     *
+     * It sat on `summary` for as long as this app had no picture at all: `public/` held the
+     * five untouched Next scaffold SVGs, there was no `opengraph-image` or `twitter-image`
+     * convention anywhere, and `app/favicon.ico` is emitted as `<link rel="icon">` — never as
+     * `twitter:image`. Every share was a text card wearing the label for the other kind, which
+     * changes nothing a reader sees, which is why it survived: nothing renders wrong.
+     *
+     * `app/opengraph-image.tsx` is that picture, so the label can be true now. Downgrading it
+     * back fails `test/shareMetadata.test.ts`, which is the point — the declaration and the
+     * file that backs it are one arrangement, not two facts that happen to agree today.
+     */
+    card: TWITTER_CARD,
+    title: TITLE,
+    description: DESCRIPTION,
   },
 };
 
@@ -70,10 +107,18 @@ export default function RootLayout({
             <div>
               &copy; {new Date().getFullYear()} TypeStory. Free open-access touch typing and English learning platform.
             </div>
-            <div className="flex gap-4">
-              <Link href="/stories" className="hover:text-indigo-600">Stories</Link>
-              <Link href="/vocab" className="hover:text-indigo-600">Word Banks</Link>
-              <Link href="/custom" className="hover:text-indigo-600">Paste Text</Link>
+            <div className="flex flex-wrap justify-center gap-4">
+              {/* The header's list, not a second hand-written one. Three of these six
+                * used to be written out by hand, and Placement, Writing and Tutor were
+                * in the header alone. The footer is the one fixed position on every page,
+                * which is what a learner has when the nav has wrapped to a second row —
+                * see the note on the list. `Icon` is the header's; the footer takes the
+                * label alone. */}
+              {NAV_ROUTES.map(({ href, label }) => (
+                <Link key={href} href={href} className="hover:text-indigo-600">
+                  {label}
+                </Link>
+              ))}
             </div>
           </div>
         </footer>

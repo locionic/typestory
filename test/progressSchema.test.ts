@@ -32,6 +32,7 @@ const stats = (over: Partial<UserStats> = {}): UserStats => ({
   bestWpm: 62,
   averageWpm: 62,
   averageAccuracy: 98,
+  bestAccuracy: 98,
   ...over,
 });
 
@@ -154,6 +155,32 @@ describe('session validation', () => {
 
   it('refuses accuracy above 100', () => {
     expectRejected(withSession({ accuracy: 140 }), 'accuracy');
+  });
+
+  /**
+   * The other half of the same bound, which the two `wpm` tests directly above already ask.
+   *
+   * `isPercent` is `value >= 0 && value <= 100` — written identically to `isWpm`, two lines
+   * down in `lib/progress-schema.ts`, and `wpm` is pinned from both sides while `accuracy`
+   * was pinned only from above. That asymmetry is what makes the lower bound look like dead
+   * code: a reader of this file sees `refuses accuracy above 100` and no reason to believe
+   * anything below it was ever checked.
+   *
+   * It is not redundant with the load-time filter, which is the obvious objection — every
+   * numeric field is re-checked by `lib/stats.ts:234-238` on the way out of storage. Both
+   * call sites are the *same* `isPercent`, so they are one predicate evaluated twice, not
+   * two defences: deleting `value >= 0` disables the wire check and the load check in the
+   * same edit, and the negative value survives both. From there it is rendered, not merely
+   * stored — `StatsModal.tsx:671` prints `{session.accuracy}% acc` with no clamp, so the
+   * history row reads "-40% acc", and `lib/stats.ts:443` folds it into `averageAccuracy`
+   * where a single bad session drags the headline percentage down to something plausible
+   * rather than obviously false.
+   *
+   * Canaried by deleting `value >= 0` from `isPercent` and running the whole suite: 761
+   * passed, 51 files, no failure. That is what made this pin worth writing.
+   */
+  it('refuses a negative accuracy', () => {
+    expectRejected(withSession({ accuracy: -5 }), 'accuracy');
   });
 
   it('refuses a malformed dateStr', () => {

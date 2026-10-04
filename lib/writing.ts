@@ -12,25 +12,41 @@ import type { ValidationIssue } from './progress-schema';
 
 /** Trust boundary: a submission is untrusted input. */
 export const MAX_TEXT_CHARS = 4000;
-export const MAX_CORRECTED_CHARS = 6000;
-export const MAX_SUMMARY_CHARS = 600;
 
 /**
- * Deliberately above the ceiling the system prompt states.
+ * The other three model-output caps, interpolated straight into the system prompt.
+ *
+ * Every cap here rejects the *whole* report — a valid summary, a valid rewrite and
+ * every note lost together — so a model that never heard a ceiling loses everything for
+ * one field. The schema cannot carry it: structured outputs support neither array nor
+ * string constraints, so `maxLength` and `maxItems` would be stripped by the SDK and
+ * constrain nothing while looking like it did. The prompt is the only channel, and these
+ * are written into it rather than typed beside it, so the number the model is given and
+ * the number the validator enforces cannot drift apart.
+ *
+ * MAX_CORRECTED_CHARS is the one that bites. A submission is capped at 4000 characters
+ * and the prompt tells the model not to shorten what was written, so the only headroom
+ * between a learner's essay and losing their whole correction is a factor of 1.5.
+ */
+export const MAX_CORRECTED_CHARS = 6000;
+export const MAX_SUMMARY_CHARS = 600;
+export const MAX_SPAN_CHARS = 300;
+export const MAX_NOTE_CHARS = 240;
+
+/**
+ * Deliberately above the ceiling the system prompt states, and the one cap that is not
+ * interpolated.
  *
  * This is the only model-output cap the learner can drive over on their own: a longer
  * essay has more distinct problems in it, and the prompt asks for one entry per problem.
- * The schema cannot help — structured outputs support neither array nor string
- * constraints, so `maxItems` would be stripped by the SDK and constrain nothing while
- * looking like it did. That leaves the prompt as the only thing telling the model a
- * ceiling exists, and tripping this cap rejects the whole report: a valid summary, a
- * valid rewrite and every one of the first ten notes thrown away together. So the stated
- * ceiling sits below the cap, and the gap is where an imprecise count lands instead of
- * being discarded.
+ * The stated ceiling is a hand-written eight because the gap is where an imprecise count
+ * lands: `parseCorrectionReport` slices to this number rather than throwing the report
+ * away, so a model that answers with nine gives the learner a truncated list instead of
+ * nothing, and a model that never heard the cap existed gives them nothing at all.
+ * test/writing.test.ts reads the number back out of the prompt so the two cannot drift
+ * apart unnoticed.
  */
 export const MAX_IMPROVEMENTS = 10;
-export const MAX_SPAN_CHARS = 300;
-export const MAX_NOTE_CHARS = 240;
 
 /**
  * Below this there is nothing to correct, and grading "hi" spends a model call
@@ -88,7 +104,14 @@ into a register they did not ask for.
 - improvements: one entry per distinct problem, most important first, and no more than 8 of
   them. original is the smallest span of their text that changes, corrected is the
   replacement, and note is one short sentence saying why. Return an empty array when the
-  text needs nothing.
+  text needs nothing — and only then, because an empty array is shown to the learner as
+  their writing having needed nothing at all.
+
+Length limits: keep summary under ${MAX_SUMMARY_CHARS} characters, corrected under
+${MAX_CORRECTED_CHARS}, each original or corrected span under ${MAX_SPAN_CHARS}, and each
+note under ${MAX_NOTE_CHARS}. Going over one is not fatal — the field is trimmed with an
+ellipsis and the rest of the report survives — but a trimmed correction ends
+mid-sentence, so stay inside each limit with room to spare.
 
 Rules:
 - Judge the English, not the topic, and not the intent behind a mistake you cannot see.
@@ -119,7 +142,38 @@ export function buildCorrectionRequest(text: string): { system: string; user: st
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const tooLong = (value: string, max: number) => value.length > max;
+/**
+ * Clip an over-long model string to its cap, marked as clipped.
+ *
+ * Length used to be a rejection like every other check here, which made this parser
+ * all-or-nothing for the wrong reason: a 601-character summary is a good summary, and
+ * throwing it away also threw away the corrected rewrite and every note with it, after
+ * the learner had already waited out the model call. Clipping keeps the property that
+ * actually protects the page — nothing downstream reads a string longer than its cap —
+ * and stops one verbose field deciding the fate of the whole report.
+ *
+ * The marker is not decoration. A silently sliced span reads as the whole span, so the
+ * learner would be told the change was `went to the store` when it was the first 299
+ * characters of something longer.
+ *
+ * Applied to model output only. `parseWritingRequest` still rejects an over-long
+ * submission, and that is the same word for the opposite situation: an over-long paste
+ * is the client sending something wrong, and the page caps the box at exactly this
+ * number, so there is nothing to salvage and something to tell the learner about.
+ *
+ * lib/placement.ts and lib/tutor.ts clip the same way, for the same reason.
+ */
+const clip = (value: string, max: number) =>
+  value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+
+/**
+ * Measured on the trimmed string, the same way `parseWritingRequest` measures the
+ * submission: a field holding only whitespace says nothing, and a page that renders
+ * it draws a blank. `parseTutorReply` has always done this; here `.length === 0` let
+ * three spaces through, and because the report is all-or-nothing that blank cost the
+ * whole thing — see `parseCorrectionReport`.
+ */
+const isBlank = (value: string) => value.trim().length === 0;
 
 export type WritingRequestResult =
   | { ok: true; value: { text: string } }
@@ -164,61 +218,52 @@ export function parseCorrectionReport(raw: unknown): CorrectionReportResult {
     return { ok: false, issues: [{ path: '', message: 'expected a JSON object' }] };
   }
 
-  if (typeof raw.summary !== 'string' || raw.summary.length === 0) {
+  if (typeof raw.summary !== 'string' || isBlank(raw.summary)) {
     issues.push({ path: 'summary', message: 'expected a non-empty string' });
-  } else if (tooLong(raw.summary, MAX_SUMMARY_CHARS)) {
-    issues.push({ path: 'summary', message: `expected at most ${MAX_SUMMARY_CHARS} characters` });
   }
 
-  if (typeof raw.corrected !== 'string' || raw.corrected.length === 0) {
+  if (typeof raw.corrected !== 'string' || isBlank(raw.corrected)) {
     issues.push({ path: 'corrected', message: 'expected a non-empty string' });
-  } else if (tooLong(raw.corrected, MAX_CORRECTED_CHARS)) {
-    issues.push({
-      path: 'corrected',
-      message: `expected at most ${MAX_CORRECTED_CHARS} characters`,
-    });
   }
 
-  if (!Array.isArray(raw.improvements)) {
+  const entries = Array.isArray(raw.improvements) ? raw.improvements : undefined;
+  if (!entries) {
     issues.push({ path: 'improvements', message: 'expected an array' });
-  } else if (raw.improvements.length > MAX_IMPROVEMENTS) {
-    issues.push({
-      path: 'improvements',
-      message: `expected at most ${MAX_IMPROVEMENTS} entries`,
-    });
   } else {
-    raw.improvements.forEach((entry, index) => {
+    // Every entry is validated, not just the ones that survive the slice: a malformed
+    // ninth improvement is still a report the model got wrong, and silently dropping it
+    // is how a report arrives looking complete when it is not.
+    entries.forEach((entry, index) => {
       const path = `improvements[${index}]`;
       if (!isObject(entry)) {
         issues.push({ path, message: 'expected an object' });
         return;
       }
       for (const key of ['original', 'corrected', 'note'] as const) {
-        if (typeof entry[key] !== 'string' || entry[key].length === 0) {
+        if (typeof entry[key] !== 'string' || isBlank(entry[key])) {
           issues.push({ path: `${path}.${key}`, message: 'expected a non-empty string' });
         }
-      }
-      if (typeof entry.original === 'string' && tooLong(entry.original, MAX_SPAN_CHARS)) {
-        issues.push({
-          path: `${path}.original`,
-          message: `expected at most ${MAX_SPAN_CHARS} characters`,
-        });
-      }
-      if (typeof entry.corrected === 'string' && tooLong(entry.corrected, MAX_SPAN_CHARS)) {
-        issues.push({
-          path: `${path}.corrected`,
-          message: `expected at most ${MAX_SPAN_CHARS} characters`,
-        });
-      }
-      if (typeof entry.note === 'string' && tooLong(entry.note, MAX_NOTE_CHARS)) {
-        issues.push({
-          path: `${path}.note`,
-          message: `expected at most ${MAX_NOTE_CHARS} characters`,
-        });
       }
     });
   }
 
+  // Bail before clipping. Clipping repairs a field that is too long, and a field that is
+  // the wrong shape or blank has nothing to clip — building a value here would mean
+  // reading it as the type this function has just promised the caller it checked.
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, value: raw as unknown as CorrectionReport };
+
+  return {
+    ok: true,
+    value: {
+      summary: clip(raw.summary as string, MAX_SUMMARY_CHARS),
+      corrected: clip(raw.corrected as string, MAX_CORRECTED_CHARS),
+      improvements: (entries as Record<string, unknown>[]).slice(0, MAX_IMPROVEMENTS).map(
+        (entry) => ({
+          original: clip(entry.original as string, MAX_SPAN_CHARS),
+          corrected: clip(entry.corrected as string, MAX_SPAN_CHARS),
+          note: clip(entry.note as string, MAX_NOTE_CHARS),
+        }),
+      ),
+    },
+  };
 }
