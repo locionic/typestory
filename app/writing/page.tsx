@@ -28,11 +28,62 @@ const ERROR_TEXT: Record<string, string> = {
  */
 const HEADING = 'Get your writing corrected';
 
+/** Where the draft waits out a reload. Per device: never in the backup payload. */
+const DRAFT_KEY = 'typestory:writing';
+
+interface SavedDraft {
+  text: string;
+  report: CorrectionReport | null;
+}
+
+/**
+ * The learner's own writing, and the correction of it, outlive the visit.
+ *
+ * Both lived in component state and nowhere else, so a refresh — or a tab closed and
+ * reopened — cost the learner their essay, which is their own work and, as the comment on
+ * "Check something else" below already puts it, exists nowhere else: no copy, no history,
+ * no undo. The correction went with it, which is the half worth thinking about twice,
+ * because it is a model call's work and the *only* way to get it back is to pay for it
+ * again.
+ *
+ * The two halves are validated apart, because they are not worth the same. A report this
+ * cannot read is dropped and the text kept: the correction is replaceable by asking again,
+ * the essay is not. One invalid field costing the other half is the failure mode this
+ * ordering exists to prevent.
+ */
+function loadDraft(): SavedDraft {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return { text: '', report: null };
+    const parsed = JSON.parse(raw) as Partial<SavedDraft> | null;
+    return {
+      text: typeof parsed?.text === 'string' ? parsed.text : '',
+      report: Array.isArray(parsed?.report?.improvements) ? parsed.report : null,
+    };
+  } catch {
+    return { text: '', report: null };
+  }
+}
+
+function saveDraft(draft: SavedDraft): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // A browser that refuses the write still has the essay on screen and still grades it;
+    // it just will not survive a reload. Nothing to report, nothing to retry.
+  }
+}
+
 export default function WritingPage() {
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [text, setText] = useState('');
-  const [report, setReport] = useState<CorrectionReport | null>(null);
+  // Read once, on the first render, and read by both. Safe from a hydration mismatch for
+  // the same reason the placement page's is: the server has no localStorage and never gets
+  // past `if (!bundle)`, so neither the server nor the first client render reaches either
+  // the report or the editor.
+  const [draft] = useState(loadDraft);
+  const [text, setText] = useState(draft.text);
+  const [report, setReport] = useState(draft.report);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -69,6 +120,7 @@ export default function WritingPage() {
 
       const data = (await res.json()) as { report?: CorrectionReport; error?: string };
       if (!res.ok || !data.report) throw new Error(data.error ?? 'unknown');
+      saveDraft({ text, report: data.report });
       setReport(data.report);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
@@ -202,6 +254,11 @@ export default function WritingPage() {
               // "Check something else", and the learner's own words are sitting in the box
               // being looked at. Pressing it again is then a decision rather than a
               // surprise, and it costs exactly what the first correction cost.
+              // Forgetting the correction must not forget the essay with it. That was
+              // already the deliberate decision above — the button clears the report and
+              // leaves the words in the box — and it now has to survive a reload as well,
+              // or a learner who reloads after pressing it finds the box empty too.
+              saveDraft({ text, report: null });
               setReport(null);
             }}
             className="w-full rounded-2xl border border-gray-200 bg-white px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -232,6 +289,13 @@ export default function WritingPage() {
             // invariant that now holds it instead.
             onChange={(event) => {
               setText(event.target.value);
+              // Saved per keystroke, and per keystroke is the point: the loss this fixes is
+              // a refresh *while writing*, which no amount of saving on submit would catch.
+              // A 4KB `setItem` per character is cheap, and the alternative is a debounce
+              // whose only job is to exist. `report: null` is not a guess — the editor and
+              // the report cannot both be mounted, so a change here can only ever be to a
+              // draft that has no correction yet. See the note above the `onChange`.
+              saveDraft({ text: event.target.value, report: null });
             }}
             placeholder="Yesterday I go to the market with my sister. She buy a lot of vegetables and we come back home very late…"
             className="mt-3 w-full rounded-xl border border-gray-200 bg-white p-3 text-sm leading-relaxed text-gray-800 outline-none transition focus:border-indigo-500 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200"
