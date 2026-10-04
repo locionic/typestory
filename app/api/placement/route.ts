@@ -1,4 +1,7 @@
+import { STORIES } from '../../../data/stories';
+import { VOCAB_BANKS } from '../../../data/vocab';
 import { createModelClient } from '../../../lib/ai';
+import { rateLimited } from '../../../lib/rate-limit';
 import {
   MAX_WRITING_CHARS,
   PASS_RATE,
@@ -17,7 +20,7 @@ import {
  * CEFR A1–B1 placement test.
  *
  *   GET  /api/placement              -> 200 { questions, writingTask, maxWritingChars,
- *                                            passRate, levels }
+ *                                            passRate, levels, catalog }
  *   POST /api/placement { answers, writing? }
  *                                    -> 200 { level, cappedByWriting, objective, writing,
  *                                              writingOutcome }
@@ -84,6 +87,27 @@ export async function GET() {
       maxWritingChars: MAX_WRITING_CHARS,
       passRate: PASS_RATE,
       levels: PLACEMENT_LEVELS,
+      // Four fields per story, so the card can recommend a starting point without the
+      // page importing the catalog: `STORIES` carries every paragraph, and a client
+      // import would put 32K of prose in the bundle to render three links.
+      catalog: STORIES.map(({ slug, title, level, readingTimeMinutes }) => ({
+        slug,
+        title,
+        level,
+        readingTimeMinutes,
+      })),
+      // Four fields per bank, for the same reason and with the same rule. `data/vocab.ts`
+      // is 11K and every byte of that is a definition, a phonetic and a Vietnamese
+      // translation; a client import to rank four banks against a level would put all of it
+      // in the placement bundle to render one link. `words` is reduced to its length, which
+      // is the only thing about it a card reads — the same reduction a story's paragraphs
+      // get, for the same reason.
+      banks: VOCAB_BANKS.map(({ slug, title, level, words }) => ({
+        slug,
+        title,
+        level,
+        wordCount: words.length,
+      })),
     },
     200,
   );
@@ -120,6 +144,21 @@ export async function POST(request: Request) {
     // wrote something and asked for it to be graded.
     outcome = 'failed';
     try {
+      // Here and not at the door, because everything above this line is free: the quiz
+      // is scored in code and reaches no model at all. A ceiling on the whole request
+      // would throttle the placement test itself in order to guard a spend only the
+      // optional essay half makes, and would refuse a free operation to protect against
+      // one that is not.
+      //
+      // The Response is thrown rather than returned so the grade lands in the `catch`
+      // below, which is already documented as the one place every optional-half failure
+      // degrades. That is the whole of the policy: the essay is not graded, the quiz
+      // still places the learner, and `writingOutcome` stays `'failed'` — which is
+      // exactly true, because they wrote something and it did not come back. See
+      // lib/rate-limit.ts for the ceiling itself.
+      const throttled = rateLimited(request);
+      if (throttled) throw throttled;
+
       const client = createModelClient();
       const output = await client.generate({
         ...buildWritingRequest(writing),

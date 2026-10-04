@@ -1,4 +1,4 @@
-import { VocabItem } from '../lib/types';
+import { VocabItem, CefrLevel } from '../lib/types';
 
 export interface VocabCategory {
   /**
@@ -18,6 +18,22 @@ export interface VocabCategory {
   description: string;
   badge: string;
   iconEmoji: string;
+  /**
+   * The English demand of this bank's words — the same thing a story's `level` is.
+   *
+   * A judgement, and four of them rather than twenty-six: the alternative is a level per
+   * word, which is a number about a word that this file does not hold and that no filter
+   * over banks can use. It is written out so the judgement is visible rather than implied
+   * — the placement result ranks banks against it and says why the ones above were not
+   * offered, and the `/vocab` tab shows it beside the bank.
+   *
+   * The definition is "how much English does reading these needs", not "how likely is a
+   * learner here to already know them". Those differ for the two technical banks, whose
+   * readers are often software engineers who know `concurrency` and are typing it to
+   * practise spelling rather than meaning. The ceiling a placement ranks against has to be
+   * the harder of the two, or an A2 learner is handed `corroborate`.
+   */
+  level: CefrLevel;
   words: VocabItem[];
 }
 
@@ -28,6 +44,9 @@ export const VOCAB_BANKS: VocabCategory[] = [
     description: 'Master technical terminology and system architecture vocabulary used by modern full-stack and cloud engineers.',
     badge: 'Tech & Architecture',
     iconEmoji: '🚀',
+    // B2 on the demand of the words, not on who is likely to read them: `reranking`,
+    // `provisioning` and `orchestration` are dense with morphology a B1 reader has not met.
+    level: 'B2',
     words: [
       {
         word: 'serverless',
@@ -101,6 +120,10 @@ export const VOCAB_BANKS: VocabCategory[] = [
     description: 'The core English vocabulary every fluent speaker needs for everyday conversations and reading.',
     badge: 'Core Foundation',
     iconEmoji: '📚',
+    // A1, and the only bank below B2. `achieve`, `benefit`, `challenge`, `discover`,
+    // `efficient`, `generate`, `improve`, `knowledge` are the everyday core this bank is
+    // named for; `efficient` and `generate` sit at the top of A1 rather than inside it.
+    level: 'A1',
     words: [
       {
         word: 'achieve',
@@ -174,6 +197,12 @@ export const VOCAB_BANKS: VocabCategory[] = [
     description: 'High-scoring academic verbs and adjectives for IELTS Band 7.5+ writing and speaking.',
     badge: 'Exam Prep',
     iconEmoji: '🎓',
+    // B2, though the bank's own description says "Band 7.5+" and `ubiquitous` and
+    // `corroborate` are C1. It is tagged at the floor the words support rather than the
+    // band it aims at, because a learner is placed by what they can read, not by what they
+    // are working towards — and B1 is the top of the quiz, so nothing this bank is aimed at
+    // is reachable as a recommendation. That is the honest answer, not a gap to paper over.
+    level: 'B2',
     words: [
       {
         word: 'ubiquitous',
@@ -223,6 +252,9 @@ export const VOCAB_BANKS: VocabCategory[] = [
     description: 'Essential terminology for software engineers, code reviews, documentation, and technical interviews.',
     badge: 'Software Engineering',
     iconEmoji: '💻',
+    // B2, the same call as the bank above: `idempotent` and `immutable` are everyday to a
+    // software engineer and still unfamiliar morphology to a B1 English reader.
+    level: 'B2',
     words: [
       {
         word: 'asynchronous',

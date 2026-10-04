@@ -17,6 +17,12 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_model_output: 'The reply came back unusable. Please try again.',
   ai_refusal: 'The model declined to answer that. Try asking about English instead.',
   ai_unavailable: 'The tutor is not reachable right now. Please try again.',
+  // The one code here that is the app's doing rather than an outage, and the only one
+  // where waiting is the whole remedy — so it says so, and says what is kept. Without
+  // it the fallback two lines down reports the tutor as unable to answer, which is a
+  // claim about the world: the tutor is answering fine, just not twenty times a minute.
+  // See lib/rate-limit.ts.
+  rate_limited: 'Too many messages in a row. Wait a moment and send yours again.',
 };
 
 const STARTERS = [

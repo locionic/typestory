@@ -18,6 +18,10 @@ const roots: { unmount: () => void }[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
   useTypingStore.getState().resetSession();
+  // Same reason the store is reset on the line above: the page now opens on the draft it
+  // stored, so a test that pasted one would hand the next test a textarea showing that paste
+  // instead of the opening sample.
+  localStorage.clear();
   // `resetSession` deliberately leaves the passage alone, so a test that started a custom
   // session would hand the next one a store that already holds one — and a page that reads
   // the store back would open on that passage instead of the opening sample. Not a test
@@ -441,5 +445,107 @@ describe('coming back to it', () => {
 
     expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe(SAMPLES[0].text);
     expect(host.textContent).not.toContain('lantern');
+  });
+});
+
+/**
+ * The other half of "coming back": a refresh rather than a click.
+ *
+ * The store is a module singleton, so it survives leaving the page and does not survive
+ * reloading it — which made the test above pass for a page that lost a pasted chapter at F5.
+ * The passage is the learner's own work, copied out of a document they would have to open
+ * and find again, and it is the third page holding a learner's text where `/placement` and
+ * `/writing` now keep theirs.
+ *
+ * Every test here leaves the *store* alone, which is what separates this from the describe
+ * above: a draft that was never started is held by nothing but the draft, so a restore that
+ * quietly read the store would pass none of them.
+ *
+ * Canaried three ways, each against the mechanism it names. Emptying `saveDraft` kills all
+ * three of the draft tests and leaves the precedence one green, which is the split the
+ * describe was built around. `??` swapped for `||` kills only the cleared-box test — that is
+ * the canary for the `null`-vs-`''` distinction, and the first one I wrote was wrong: dropping
+ * the `draft` read entirely breaks the same test for an unrelated reason, so it proved the
+ * draft was stored but not the thing this test exists to pin. And deleting the store's
+ * `restored` branch from `initialText` kills only the precedence test.
+ */
+describe('reloading the page', () => {
+  const PASTED = 'The tide came in overnight and left a seam of kelp across the path.';
+
+  it('still holds a passage that was pasted but never started', () => {
+    const first = renderPage();
+    paste(first, PASTED);
+
+    leavePage();
+    const second = renderPage();
+
+    expect((second.querySelector('textarea') as HTMLTextAreaElement).value).toBe(PASTED);
+    // The pre-condition: nothing was ever run, so this cannot be the store answering.
+    expect(useTypingStore.getState().sourceType).not.toBe('custom');
+  });
+
+  /**
+   * The half that is easy to get wrong and invisible when it is.
+   *
+   * `presetIndex` is what decides whether the run is recorded under a sample's name or under
+   * "Custom Text", and the page's own history here is a bug where the two initialisers
+   * disagreed about it — so a restored draft that showed the right text under the wrong
+   * preset would type correctly and then file the session wrongly, and the wrong row goes
+   * into the backup. Asserted through `Start`, which is the only thing that names a session.
+   */
+  it('keeps a chosen sample named as itself, not as Custom Text', () => {
+    const first = renderPage();
+    const preset = [...first.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Sample 2',
+    );
+    if (!preset) throw new Error('the page offers no presets');
+    act(() => preset.click());
+
+    leavePage();
+    const second = renderPage();
+    expect((second.querySelector('textarea') as HTMLTextAreaElement).value).toBe(SAMPLES[1].text);
+
+    start(second);
+    expect(useTypingStore.getState().title).toBe(SAMPLES[1].title);
+  });
+
+  /**
+   * A box the learner deliberately emptied.
+   *
+   * `null` and `''` are different stored values here, and the difference is the whole test:
+   * a draft read as "empty means fall back to the opening sample" would put a passage back
+   * into a box the learner had just cleared, which is the surprising direction.
+   */
+  it('leaves a cleared box cleared rather than refilling it with a sample', () => {
+    const first = renderPage();
+    paste(first, PASTED);
+    paste(first, '');
+
+    leavePage();
+    const second = renderPage();
+
+    expect((second.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  /**
+   * Precedence, and the one that is not obviously right in either direction: a run in the
+   * store wins over a stored draft.
+   *
+   * The store holds what the learner is drilling *now*, and the draft is what they are
+   * writing for next — a difference the page keeps on purpose, with the textarea and the
+   * board holding different text. Restoring the draft on top of the run would show the
+   * passage in the box that the board is not running, and `Start` would then silently
+   * replace the run in progress with it.
+   */
+  it('prefers the run in the store over the draft being written', () => {
+    const first = renderPage();
+    paste(first, PASTED);
+    start(first);
+    paste(first, 'Something else entirely, half-written.');
+
+    leavePage();
+    const second = renderPage();
+
+    expect((second.querySelector('textarea') as HTMLTextAreaElement).value).toBe(PASTED);
   });
 });

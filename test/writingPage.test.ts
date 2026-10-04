@@ -13,6 +13,10 @@ const roots: { unmount: () => void }[] = [];
 
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
+  // The page restores the last draft and its correction on mount, and a test that left
+  // either behind would turn the next test's fresh mount into the report rather than the
+  // editor — no textarea, so `checkSomeWriting` would type into a box that is not there.
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -47,6 +51,16 @@ async function mount(post: (init?: RequestInit) => Response): Promise<HTMLElemen
 
 /** What `checkSomeWriting` types. Read back by the tests that assert on the editor. */
 const SUBMITTED = 'Yesterday I go to the market with my sister.';
+
+/** Type into the textarea the way a learner would. */
+const edit = async (host: HTMLElement, text: string) => {
+  const textarea = host.querySelector('textarea')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  await act(async () => {
+    setter.call(textarea, text);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
 
 /** Type enough to pass the button's own gate and press it, as a learner would. */
 async function checkSomeWriting(host: HTMLElement): Promise<void> {
@@ -293,16 +307,6 @@ describe('the editor and the report', () => {
     ],
   });
 
-  /** Type into the textarea the way a learner would. */
-  const edit = async (host: HTMLElement, text: string) => {
-    const textarea = host.querySelector('textarea')!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setter.call(textarea, text);
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-  };
-
   it('never shows a report next to the text it is grading', async () => {
     const host = await correctedPage(report());
 
@@ -404,5 +408,114 @@ describe('the editor and the report', () => {
     // And editing it works, which is the state the deleted guard used to be defending.
     await edit(host, 'Yesterday I went to the market with my sister and bought vegetables.');
     expect(host.querySelector('textarea')!.value).toContain('vegetables');
+  });
+});
+
+/**
+ * The essay outliving the visit, which is the part of this page that was actually losable.
+ *
+ * The essay is the learner's own work, and the comment on "Check something else" already
+ * says it exists nowhere else — no copy, no history, no undo. It lived in component state
+ * and nowhere else, so a refresh mid-sentence threw it away, and the report with it: a
+ * model call's worth of correction, reachable again only by paying for it a second time.
+ *
+ * These walk the real round trip through the component — type, or submit; unmount; mount
+ * again — because seeding localStorage by hand would prove the read and say nothing about
+ * the write, which is the half that can quietly go missing.
+ *
+ * Canaried four ways, each against the mechanism it names, and each failing exactly one
+ * test: dropping the `onChange` save, dropping the save on submit, dropping the save on
+ * "Check something else", and relaxing the report guard to a bare `?? null` — which goes
+ * red with `Cannot read properties of undefined (reading 'length')`, the crash-in-render
+ * the guard exists to prevent.
+ */
+describe('reopening the page', () => {
+  const report = (): CorrectionReport => ({
+    summary: 'Tense agreement is the thing costing you most.',
+    corrected: 'Yesterday I went to the market with my sister.',
+    improvements: [{ original: 'go', corrected: 'went', note: 'Past simple, because "yesterday".' }],
+  });
+
+  /** A visit with nothing stored. The POST is never reached — nothing is pressed. */
+  const reopen = () => mount(() => json({ report: report() }));
+
+  function reload(): void {
+    const root = roots.pop();
+    if (!root) throw new Error('nothing mounted to reload');
+    act(() => root.unmount());
+  }
+
+  /**
+   * The loss the page could not see coming: no submit, no correction, no confirmation —
+   * a browser refresh in the middle of writing.
+   */
+  it('still holds an essay that was never graded', async () => {
+    const first = await reopen();
+    await edit(first, SUBMITTED);
+
+    reload();
+    const second = await reopen();
+
+    expect((second.querySelector('textarea') as HTMLTextAreaElement).value).toBe(SUBMITTED);
+  });
+
+  it('still shows a correction, so it is not paid for twice', async () => {
+    const first = await mount(() => json({ report: report() }));
+    await checkSomeWriting(first);
+    expect(first.textContent).toContain('Tense agreement');
+
+    reload();
+    const second = await reopen();
+
+    expect(second.textContent).toContain('Tense agreement');
+    // Asserted rather than assumed: "no editor" is also true of a page that failed to
+    // render, which would satisfy the sentence above on its own.
+    expect(second.querySelector('textarea')).toBeNull();
+    expect(second.textContent).toContain('Check something else');
+  });
+
+  /**
+   * The one that had to be designed rather than copied: pressing "Check something else"
+   * clears the report, and the decision already recorded on that button is that the words
+   * stay. Persisting makes that a claim about storage too — a reload after pressing it must
+   * still find the essay, or the button destroys both halves across a refresh even though it
+   * no longer destroys both halves on screen.
+   */
+  it('"Check something else" forgets the correction and keeps the essay', async () => {
+    const host = await mount(() => json({ report: report() }));
+    await checkSomeWriting(host);
+    const button = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Check something else',
+    );
+    if (!button) throw new Error('the report offers no way back to the editor');
+    await act(async () => {
+      button.click();
+    });
+
+    reload();
+    const again = await reopen();
+
+    expect((again.querySelector('textarea') as HTMLTextAreaElement).value).toBe(SUBMITTED);
+    expect(again.textContent).not.toContain('Tense agreement');
+  });
+
+  /**
+   * The control on validating the two halves apart, and the reason they are apart.
+   *
+   * A stored report missing `improvements` is not a report: the card does
+   * `report.improvements.length`, so accepting it throws inside a render and tears the
+   * document down. The temptation is to drop the whole blob and start clean. That would
+   * trade the learner's own essay — the half that exists nowhere else — for a correction
+   * they can ask for again, so the guard keeps the text and drops only the report.
+   */
+  it('keeps the essay when a stored correction cannot be read', async () => {
+    localStorage.setItem(
+      'typestory:writing',
+      JSON.stringify({ text: SUBMITTED, report: { summary: 'x', corrected: 'y' } }),
+    );
+
+    const host = await reopen();
+
+    expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe(SUBMITTED);
   });
 });

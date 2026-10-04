@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle2, GraduationCap, AlertCircle, Loader2 } from 'lucide-react';
 // `import type` is erased at compile time, so the question bank and its answer key
 // never reach the browser. The questions arrive from GET /api/placement instead.
+import type { CefrLevel } from '../../lib/types';
 import type { Placement, PlacementLevel, PublicQuestion } from '../../lib/placement';
 
 interface PlacementBundle {
@@ -26,6 +27,118 @@ interface PlacementBundle {
    */
   passRate: number;
   levels: PlacementLevel[];
+  /**
+   * Four fields per story, served by GET rather than imported.
+   *
+   * The catalog carries every paragraph, and `data/stories.ts` is 32K of prose — a client
+   * import to pick three titles would put all of it in the bundle. The projection is the
+   * route's to make, so the same slice that keeps it out of the browser is the one that
+   * decides what a card is allowed to show.
+   */
+  catalog?: { slug: string; title: string; level: CefrLevel; readingTimeMinutes: number }[];
+  /**
+   * The banks, three fields each, for the same reason the catalog is four.
+   *
+   * Optional for the same reason it is: the page has to render against a bundle that
+   * predates the key, and a missing `banks` is a route that has not been redeployed, not an
+   * error worth a card of its own.
+   */
+  banks?: { slug: string; title: string; level: CefrLevel; wordCount: number }[];
+}
+
+/**
+ * Where a level sits on the ladder, in one place.
+ *
+ * `PLACEMENT_LEVELS` is three entries wide and stops at B1, because that is as far as the
+ * quiz can place anyone; the catalog goes on above that. Recommending "at or below the
+ * level" needs the whole ladder to compare, and a second hard-coded list beside
+ * `PLACEMENT_LEVELS` would be free to disagree with it.
+ *
+ * Exhaustive over `CefrLevel`, which is the only reason a ladder written by hand is safe:
+ * it used to stop at C1, so a C2 story came back `indexOf === -1` and ranked *below* A1 —
+ * which put the hardest text in the app into the three links recommended to a beginner.
+ * Nothing carried C2 yet, so it was a bug with no symptom, and the comment beside it
+ * called -1 "the safe way to be wrong about one" without having checked which end was
+ * safe. A level nobody recognises is now ranked by `rank()` below instead.
+ */
+const CEFR_RANKS: readonly CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+
+/**
+ * Where a level sits, for either ladder.
+ *
+ * Past the top of the ladder rather than below its foot. `CEFR_RANKS` is written by hand
+ * and a level it does not carry — a C2 added to the corpus before this list, or a level
+ * invented by whoever served the GET — lands off the end of `indexOf`, and -1 sorts
+ * *first*. Ranks everything above the hardest rather than below the easiest, so being
+ * wrong about a story's or a bank's level can only ever withhold it from a beginner, never
+ * hand it to one.
+ *
+ * One function for both rankings because they are the same claim made about the same
+ * ladder. A second copy is a second place for the two to drift apart, and nothing would
+ * notice: the stories would still be ranked, just by a different rule than the banks.
+ */
+function cefrRank(level: CefrLevel): number {
+  const found = CEFR_RANKS.indexOf(level);
+  return found === -1 ? Number.MAX_SAFE_INTEGER : found;
+}
+
+/**
+ * The banks at or below a placed level, hardest first, and the ones held back.
+ *
+ * The same "at or below" rule the stories use, and the same reason: it is a ceiling, not a
+ * target. A B1 learner handed "IELTS Academic Vocabulary" is told they are a B1 and then
+ * spends twenty minutes on `corroborate`.
+ *
+ * The result is nearly always one bank, and that is the finding rather than a shortcoming —
+ * three of the four banks are B2, which is above the top of the quiz. A learner at any
+ * level the quiz can award is offered the A1 bank and told what the other three are, so
+ * the one undifferentiated `/vocab` link becomes a specific recommendation with a reason.
+ *
+ * `above` is carried out rather than recomputed, because the sentence naming the banks
+ * that were not offered and the list of the ones that were have to agree, and two reads of
+ * the same array are two chances not to.
+ */
+function startingBank(banks: NonNullable<PlacementBundle['banks']>, level: CefrLevel) {
+  const offered = banks
+    .filter((bank) => cefrRank(bank.level) <= cefrRank(level))
+    .sort((a, b) => cefrRank(b.level) - cefrRank(a.level));
+  const above = banks.filter((bank) => cefrRank(bank.level) > cefrRank(level));
+  return {
+    offered,
+    above,
+    // Distinct, in ladder order, so the sentence reads "B2" rather than "B2, B2, B2".
+    aboveLevels: CEFR_RANKS.filter((rung) => above.some((bank) => bank.level === rung)).join(
+      ', ',
+    ),
+  };
+}
+
+/**
+ * Three stories to start on, hardest first.
+ *
+ * Hardest first because "at or below" is a ceiling, not a target: a B1 learner handed the
+ * gentlest story in the app is told they are a B1 and then spends ten minutes on something
+ * an A1 could manage. Offering the level they were placed at first lets them be stretched
+ * and still find it readable, which is what a placement is for.
+ *
+ * The empty case is real and not hypothetical — the lowest story in the catalog is A2, so
+ * an A1 is placed below the whole corpus. Returning nothing there would render a heading
+ * with nothing under it, so the gentlest three stand in and the caller says so. The sort
+ * inverts with them: with no level to aim at, the only sensible target is the easiest
+ * text in the app, which is the opposite end of the same ladder.
+ */
+function startingStories(catalog: NonNullable<PlacementBundle['catalog']>, level: CefrLevel) {
+  const rank = (story: { level: CefrLevel }) => cefrRank(story.level);
+  const atOrBelow = catalog.filter((story) => rank(story) <= cefrRank(level));
+  const belowCatalog = atOrBelow.length === 0;
+  // Hardest first normally, gentlest first when there is nothing to aim at. One sort with
+  // the direction folded in, because two sorts of the same array undo each other.
+  return {
+    belowCatalog,
+    stories: [...(belowCatalog ? catalog : atOrBelow)]
+      .sort((a, b) => (belowCatalog ? rank(a) - rank(b) : rank(b) - rank(a)))
+      .slice(0, 3),
+  };
 }
 
 /**
@@ -269,6 +382,12 @@ export default function PlacementPage() {
       (level, index) =>
         index > passedRank && result.objective.byLevel[level].rate >= bundle.passRate,
     );
+    // Omitted rather than defaulted, because a cached bundle from the previous build has
+    // no `catalog` key at all and this card must render without it.
+    const start = bundle.catalog ? startingStories(bundle.catalog, result.level) : null;
+    // The bank recommendation is independent of the stories: one arrives without the other
+    // whenever a route predates one of the two keys, and neither may blank the other.
+    const bank = bundle.banks ? startingBank(bundle.banks, result.level) : null;
     return (
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
         <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
@@ -375,6 +494,72 @@ export default function PlacementPage() {
                 : 'Your writing was not graded, so this result comes from the quiz alone. That is normal — the writing check is optional.'}
             </p>
           )}
+
+          {start && start.stories.length > 0 && (
+              <div className="mt-6">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  Start here
+                </p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {start.belowCatalog
+                    ? `The story catalog starts at A2, so these are the gentlest we have — a good way in from ${result.level}.`
+                    : `Chosen for ${result.level}. Harder stories are one level up.`}
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {start.stories.map((story) => (
+                    <li key={story.slug}>
+                      <a
+                        href={`/stories/${story.slug}`}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 px-4 py-3 transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-gray-800 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/30"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">
+                            {story.title}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                            {story.level} · ~{story.readingTimeMinutes} min
+                          </span>
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {bank && bank.offered.length > 0 && (
+              <div className="mt-6">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  Vocabulary
+                </p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {bank.above.length > 0
+                    ? `Chosen for ${result.level}. The other ${bank.above.length} ${
+                        bank.above.length === 1 ? 'bank sits' : 'banks sit'
+                      } at ${bank.aboveLevels} — above your level.`
+                    : `Chosen for ${result.level}.`}
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {bank.offered.map((option) => (
+                    <li key={option.slug}>
+                      <a
+                        href={`/vocab?bank=${option.slug}`}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 px-4 py-3 transition hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-gray-800 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/30"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">
+                            {option.title}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                            {option.level} · {option.wordCount} {option.wordCount === 1 ? 'word' : 'words'}
+                          </span>
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button

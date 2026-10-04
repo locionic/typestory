@@ -97,6 +97,19 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
             >
               <span>{option.iconEmoji}</span>
               <span>{option.title}</span>
+              {/* The level, on the tab, in the same place the story catalog puts it on a
+                * card. It is a judgement about the words (see `VocabCategory.level`), so it
+                * is printed where a learner chooses rather than inferred from the title —
+                * "Core Foundation" is a bank name, not a difficulty claim. */}
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                  isActive
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                }`}
+              >
+
+              </span>
             </button>
           );
         })}

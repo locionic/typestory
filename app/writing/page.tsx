@@ -17,6 +17,13 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_model_output: 'The correction came back unusable. Please try again.',
   ai_refusal: 'The model declined to grade that text. Please try again.',
   ai_unavailable: 'The correction service is not reachable right now. Please try again.',
+  // The one code here that is the app's doing rather than an outage, and the only one
+  // whose remedy is simply to wait — so it names what is kept. Without it the fallback
+  // below reports the correction as failed, which is a claim about the world: the
+  // service is answering fine, just not twenty times a minute. The essay is the half
+  // worth promising, since it is the learner's own work and it is already saved.
+  // See lib/rate-limit.ts.
+  rate_limited: 'Too many corrections in a row. Wait a moment — your writing is still here.',
 };
 
 /**

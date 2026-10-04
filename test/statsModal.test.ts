@@ -387,12 +387,23 @@ describe('the speed card beside the accuracy card', () => {
 /**
  * A milestone the app cannot take back.
  *
- * Four of the five badges read a lifetime field — `bestWpm`, `dailyStreak.bestStreak`,
- * `totalWordsTyped` — because each is a thing the learner did once. Pure Precision was
- * the fifth and read `sessions.some(...)` instead, over a list capped at MAX_SESSIONS and
- * sliced on both read and write. Type a passage perfectly, record 100 more sessions, and
- * the app withdrew a badge it had granted, with no way to earn it back and nothing the
- * learner did to deserve it.
+ * Four of the six badges read a lifetime field — `bestWpm`, `dailyStreak.bestStreak`,
+ * `totalWordsTyped` — because each is a thing the learner did once. Two read the capped
+ * window instead, and only one of those can be taken back.
+ *
+ * Pure Precision asks `sessions.some((s) => s.accuracy === 100)`, so it names a *run*, and
+ * a run falls off the end: type a passage perfectly, record 100 more sessions, and the
+ * app withdrew a badge it had granted, with no way to earn it back and nothing the learner
+ * did to deserve it. First Flight asks `sessions.length >= 1`, which the full window
+ * answers — the list is capped, not drained, so no number of further sessions empties it
+ * and the badge cannot lapse.
+ *
+ * Which is not a distinction visible in the source. Both predicates read `sessions`, both
+ * sit in the same array, and this comment used to say "the fifth" over a six-badge array,
+ * so a reader checking whether anything else could lapse read a clean bill of health that
+ * was never issued. Checking it took a canary instead, and the canary came back green —
+ * which is the answer, arrived at the slow way. Count the array; do not trust the count
+ * written next to it.
  */
 describe('the Pure Precision badge', () => {
   /**
@@ -915,6 +926,260 @@ describe('each badge unlocks at the figure its own description prints', () => {
  * before `pushProgress`, and before it says anything. Reordered, the learner is told their
  * backup is on and told to keep a code that was never issued.
  */
+/**
+ * The way out of the history, which is the only reason the rows above are not selectable.
+ *
+ * `lib/csv.ts` is pinned on its own — every column, the quoting, the byte order mark, the
+ * formula defusal — and none of that says the panel offers the button, so a button wired
+ * to nothing, or to an empty array, or to `stats.sessions` before the cap has truncated it,
+ * would leave that file entirely green. The exact string below is what closes it: it is
+ * not `sessionsCsv(...)` compared with itself, which is true of any wiring at all.
+ *
+ * jsdom implements neither half of the object-URL pair, so both are installed here. That
+ * is also what makes the assertion possible — reading the Blob the export hands over is
+ * the only way to see what actually reached the browser.
+ *
+ * Canaried twice in the panel and in lib/csv.ts, each on its own and each failing only
+ * `hands the browser the stored sessions`: the button wired to `downloadSessionsCsv([])`,
+ * and `link.remove()` deleted so the anchor is left in the document. The second is why
+ * that assertion sits in this test rather than in test/csv.test.ts — the leak is only
+ * observable from the side that renders the panel.
+ */
+describe('the "Download CSV" button', () => {
+  const created: Blob[] = [];
+  const revoked: string[] = [];
+  const clicked: HTMLAnchorElement[] = [];
+
+  beforeEach(() => {
+    created.length = 0;
+    revoked.length = 0;
+    clicked.length = 0;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn((blob: Blob) => {
+        created.push(blob);
+        return 'blob:typestory-test';
+      }),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn((url: string) => {
+        revoked.push(url);
+      }),
+    });
+    // The anchor's own click is replaced rather than merely observed, because jsdom tries
+    // to navigate on a real one and logs "Not implemented" for it. Standing in for it turns
+    // that noise into an assertion: this is what proves the panel reaches `link.click()`
+    // rather than stopping at `createObjectURL`, and it is also where the filename lives.
+    Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+      configurable: true,
+      writable: true,
+      value: function (this: HTMLAnchorElement) {
+        clicked.push(this);
+      },
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(URL, 'createObjectURL');
+    Reflect.deleteProperty(URL, 'revokeObjectURL');
+    Reflect.deleteProperty(HTMLAnchorElement.prototype, 'click');
+  });
+
+  it('hands the browser the stored sessions, oldest first', async () => {
+    practiceSessions(3);
+    const host = renderModal();
+
+    await act(async () => {
+      button(host, 'Download CSV').click();
+    });
+
+    const today = getTodayDateString();
+    // No byte order mark in what follows, and not an oversight: `Blob.text()` decodes
+    // through a TextDecoder, which consumes a leading BOM by design, so this oracle
+    // cannot see the mark however it is produced. It is pinned where it can be seen —
+    // on the string, before it becomes bytes — in test/csv.test.ts. Reading the Blob is
+    // still the better oracle than `sessionsCsv(...)` compared with itself, which would
+    // be true of any wiring at all.
+    expect(await created[0].text()).toBe(
+      [
+          'Date,Title,Source,WPM,Accuracy %,Seconds,Words,Keystrokes',
+          `${today},Practice 1,custom,41,95,30,5,200`,
+          `${today},Practice 2,custom,42,95,30,5,200`,
+          `${today},Practice 3,custom,43,95,30,5,200`,
+        ].join('\r\n') +
+        '\r\n',
+    );
+
+    // Released, because an object URL pins its Blob for the life of the document: a
+    // learner who exports fifty times holds fifty copies of the whole history, for files
+    // they already have on disk. Harmless-looking, and it is a real leak.
+    expect(revoked).toEqual(['blob:typestory-test']);
+
+    // And the file is actually offered, under a name the learner will recognise, and it is
+    // removed again — an anchor left in the document is one more node per export.
+    expect(clicked.map((a) => [a.download, a.getAttribute('href')])).toEqual([
+      ['typestory-sessions.csv', 'blob:typestory-test'],
+    ]);
+    // Spread, not a bare NodeList: `toEqual` sees an empty `NodeList` and an empty array as
+    // different objects and fails on a case that is in fact correct.
+    expect([...document.querySelectorAll('a[download]')]).toEqual([]);
+  });
+
+  it('is not offered when there is nothing to export', () => {
+    // The control for the test above. Without it, a button rendered unconditionally —
+    // and handing over a header row with no sessions in it — would satisfy the click.
+    expect(() => button(renderModal(), 'Download CSV')).toThrow();
+  });
+});
+
+/**
+ * The speed trend, and the two ways a chart of it lies.
+ *
+ * The panel had four numbers and no shape. That is not a gap the CSV export could close —
+ * a table of numbers is what the learner already had, and the question a practice log
+ * exists to answer is which way the number is going. This is the answer, drawn from
+ * sessions already in memory, with no chart library: a library would be a dependency
+ * larger than the feature and would want one of its own for the responsive case that
+ * `preserveAspectRatio` plus `non-scaling-stroke` handles in two attributes.
+ *
+ * Both of its lies are asserted here rather than commented on. A truncated axis makes an
+ * ordinary improvement look flat, and a chart with no range to divide by prints a path of
+ * NaN that SVG renders as nothing — a band of the panel with two labels on it claiming a
+ * range and no line between them.
+ *
+ * Canaried three times in components/stats/StatsModal.tsx, each alone, each failing one
+ * test here and the other 46 green, and each failing the test that names the mechanism it
+ * removed: `high - low || 1` reduced to `high - low`, the `.reverse()` before `.map()`
+ * dropped, and the `length > 1` guard widened to `> 0`. The first is the one worth
+ * remembering — a flat history is the input the arithmetic cannot survive and the one a
+ * real learner produces, and nothing else in the suite would have noticed its absence.
+ */
+describe('the speed trend', () => {
+  /**
+   * The panel holding exactly this history, oldest-first WPM values.
+   *
+   * Stored the way `lib/stats.ts` stores it — newest first — so the reversal inside the
+   * panel is doing real work rather than coincidentally agreeing with a fixture that
+   * happened to be written the other way round.
+   */
+  function chartOf(wpmsOldestFirst: number[]): HTMLElement {
+    saveUserStats({ ...loadUserStats(), sessions: chartSessions(wpmsOldestFirst) });
+    return renderModal();
+  }
+
+  const points = (host: HTMLElement) =>
+    host.querySelector('svg[role="img"] polyline')?.getAttribute('points') ?? null;
+
+  /**
+   * The geometry, as the exact attribute string.
+   *
+   * Three sessions rising 40 → 50 → 60 across a 300×60 viewBox with 6 of padding, so the
+   * expected points are whole numbers and can be read off the page: 288 of usable width
+   * across three sessions is 144 a step, and 48 of usable height across a 20-wide range
+   * puts the lowest session at the bottom and the highest at the top. Anything that
+   * rescales the axis, pads it, or reverses the order changes this string.
+   */
+  it('draws the window oldest first, on a scale from its own low to its high', () => {
+    const host = chartOf([40, 50, 60]);
+
+    expect(points(host)).toBe('6,54 150,30 294,6');
+    // The control for that: an implementation which drew nothing would satisfy a
+    // `toBeTruthy` and leave both labels below claiming a range that is not there.
+    expect(host.querySelector('svg[role="img"]')).not.toBeNull();
+  });
+
+  /**
+   * The flat history, which is the one that breaks the arithmetic.
+   *
+   * High minus low is zero, so the divisor is zero, and the naive result is `NaN` in every
+   * coordinate. SVG does not report a path it cannot parse — it draws nothing — so the
+   * failure is a panel with a chart-sized gap in it, an axis reading "50 wpm" at both
+   * ends, and no line to justify either. The three identical speeds here are not a
+   * contrived input: a learner who types the same passage at the same speed every day has
+   * exactly this history, and it is the history the chart is most able to help with.
+   */
+  it('draws a flat history as a flat line rather than nothing at all', () => {
+    const host = chartOf([50, 50, 50]);
+
+    // Centred, because with no range the midpoint is the only place a line can honestly
+    // sit — the fallback divisor is what puts it there.
+    expect(points(host)).toBe('6,54 150,54 294,54');
+    expect(host.textContent).toContain('50 wpm');
+  });
+
+  /**
+   * Both ends of the truncated scale, in the order they appear on it.
+   *
+   * This is the honesty constraint and it is why the block is not just the line: the shape
+   * is allowed to be dramatic, and these two figures are what stop it being a lie. Without
+   * them the axis is a zero-free amplifier and a learner reading a steep climb has been
+   * told more than the data says.
+   */
+  it('prints the low and the high the line is scaled between', () => {
+    const host = chartOf([40, 50, 60]);
+    const ends = [...host.querySelectorAll('span')]
+      .map((el) => el.textContent)
+      .filter((text): text is string => text !== null && text.endsWith(' wpm'));
+
+    expect(ends).toEqual(['40 wpm', '60 wpm']);
+  });
+
+  /**
+   * Which window, and whose sentence.
+   *
+   * `Last 3 sessions` is the same constant the accuracy and speed cards use. Written out a
+   * second time here it would be a second thing to fall out of step, and this is the one
+   * place a stale copy does visible harm: a learner reading a chart that quietly covers
+   * every session since the beginning, because the copy saying so was never updated.
+   */
+  it('names the window, with the constant the cards use', () => {
+    const host = chartOf([40, 50, 60]);
+
+    expect(host.textContent).toContain('Last 3 sessions');
+    // And the spoken equivalent, which is the only description of the chart a screen
+    // reader ever gets: a bare polyline announces itself as "image".
+    expect(host.querySelector('svg[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Words per minute over your last 3 sessions, ranging from 40 to 60.',
+    );
+  });
+
+  /**
+   * One session is a point and a point is not a trend.
+   *
+   * The panel must not reserve a band for a chart it cannot draw, and the divisor here is
+   * `length - 1`, so this is also the branch that would print `NaN` had the caller not
+   * checked first. The empty history is the other half of the same guard.
+   */
+  it('is absent until there are two sessions to join', () => {
+    for (const sessions of [[], [45]]) {
+      saveUserStats({ ...loadUserStats(), sessions: chartSessions(sessions) });
+      const host = renderModal();
+
+      expect(host.textContent).not.toContain('Speed Trend');
+      expect(host.querySelector('svg[role="img"]')).toBeNull();
+    }
+  });
+});
+
+/** `wpms` oldest-first, stored the way the store holds them. */
+function chartSessions(wpms: number[]) {
+  return [...wpms].reverse().map((wpm, i) => ({
+    id: `s${i}`,
+    timestamp: Date.parse('2026-09-01T00:00:00Z') + i * 86_400_000,
+    dateStr: '2026-09-01',
+    title: `Practice ${i + 1}`,
+    sourceType: 'story' as const,
+    wpm,
+    accuracy: 95,
+    durationSeconds: 60,
+    wordsCount: 100,
+    keystrokes: 500,
+  }));
+}
+
 describe('pressing "Back up my progress"', () => {
   beforeEach(() => localStorage.clear());
 

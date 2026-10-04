@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from '../app/api/placement/route';
 import { createModelClient } from '../lib/ai';
 import { PLACEMENT_QUESTIONS, MAX_RATIONALE_LENGTH, MAX_WRITING_CHARS, PASS_RATE, PLACEMENT_LEVELS } from '../lib/placement';
+import { STORIES } from '../data/stories';
+import { VOCAB_BANKS } from '../data/vocab';
 
 // lib/ai is mocked at the module boundary, so the Anthropic SDK is never loaded
 // and this suite needs no API key and makes no network call.
@@ -89,6 +91,96 @@ describe('GET /api/placement', () => {
     const body = (await (await GET()).json()) as { passRate: number; levels: string[] };
     expect(body.passRate).toBe(PASS_RATE);
     expect(body.levels).toEqual([...PLACEMENT_LEVELS]);
+  });
+
+  /**
+   * The catalog the result card recommends from, and why it is four fields and not a
+   * corpus import.
+   *
+   * `data/stories.ts` carries every paragraph, so a page importing it would put 32K of
+   * prose in the bundle to render three links. The projection is the fix — and until now
+   * the *only* thing pinning it was the client fixture in test/placementPage.test.ts,
+   * which is a hand-written object, not this response. Delete `catalog` from the GET and
+   * every test in that file still passes: the page guards on `bundle.catalog ?` and
+   * renders no recommendations at all, so the whole feature disappears with the suite
+   * green. A consumer's own tests cannot see its producer break.
+   *
+   * Asserted as the exact projected objects rather than a length, because a fifth field is
+   * the regression this exists for and a `toHaveLength` would wave it through. `toEqual` is
+   * key-exact, so an added field fails here — and it is what the response carries after
+   * `json()` has dropped anything undefined, which is why an undefined-valued extra key
+   * would not have cost the bundle anything in the first place.
+   *
+   * Canaried both ways in app/api/placement/route.ts, each on its own and each failing
+   * this assertion alone at 1 of 22 with the other 21 green: `catalog` dropped from the
+   * GET body, and `wordCount` added to the projection. The first is the defect this
+   * exists for and the second is the one the `toEqual` is there for, so both halves of the
+   * assertion are load-bearing and neither is decoration.
+   */
+  it('serves a four-field catalog of every story, holding the corpus values', async () => {
+    const body = (await (await GET()).json()) as { catalog: unknown[] };
+
+    // The slugs alone, in corpus order: this is what names the failure when a story is
+    // added to data/stories.ts and not projected here, which is a link no learner is ever
+    // offered. It also keeps the assertion below from being satisfiable by an empty array.
+    expect(body.catalog.map((s) => (s as { slug: string }).slug)).toEqual(
+      STORIES.map((s) => s.slug),
+    );
+
+    expect(body.catalog).toEqual(
+      STORIES.map(({ slug, title, level, readingTimeMinutes }) => ({
+        slug,
+        title,
+        level,
+        readingTimeMinutes,
+      })),
+    );
+
+    // And the projection is what makes the response small: nothing here carries a
+    // paragraph, keyVocabulary, or the word count the story page publishes.
+    for (const served of body.catalog as Record<string, unknown>[]) {
+      expect(Object.keys(served)).not.toContain('paragraphs');
+      expect(Object.keys(served)).not.toContain('keyVocabulary');
+    }
+  });
+
+  /**
+   * The banks, on the same terms as the catalog.
+   *
+   * The projection half is mechanical and the same argument as the stories. The half that
+   * is not is the level map below: every entry in it is a judgement about how much English
+   * a bank's words demand, made once and written down in `data/vocab.ts`, and a judgement
+   * is exactly the kind of thing that gets quietly edited. Spelling it out here means
+   * retagging a bank is a test failure with a diff to argue about, rather than a number
+   * that moves and a recommendation no longer offered, for a reason nobody wrote down.
+   */
+  it('serves every bank, four fields, at the levels the data carries', async () => {
+    const body = (await (await GET()).json()) as { banks: Record<string, unknown>[] };
+
+    expect(body.banks.map((b) => b.slug)).toEqual(VOCAB_BANKS.map((b) => b.slug));
+
+    expect(body.banks).toEqual(
+      VOCAB_BANKS.map(({ slug, title, level, words }) => ({
+        slug,
+        title,
+        level,
+        wordCount: words.length,
+      })),
+    );
+
+    expect(Object.fromEntries(body.banks.map((b) => [b.slug as string, b.level]))).toEqual({
+      'oxford-essential': 'A1',
+      'ielts-academic': 'B2',
+      'tech-developer': 'B2',
+      'fullstack-cloud-engineering': 'B2',
+    });
+
+    // `words` is the field the projection exists to withhold: 11K of definitions, phonetics
+    // and translations, none of which a card reads, and all of it reachable by one import.
+    for (const served of body.banks) {
+      expect(Object.keys(served)).not.toContain('words');
+      expect(Object.keys(served)).not.toContain('description');
+    }
   });
 });
 

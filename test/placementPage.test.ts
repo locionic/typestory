@@ -32,6 +32,31 @@ const BUNDLE = {
   maxWritingChars: 1200,
   passRate: 0.6,
   levels: LEVELS,
+  // The same four fields the route projects from `STORIES`, with the shape that matters:
+  // nothing at A1, two at the placed level, and two above it — plus a C2, which no story
+  // carries today and which is exactly what made the top of the ladder load-bearing.
+  catalog: [
+    { slug: 'the-lazy-crab', title: 'The Lazy Crab', level: 'A2', readingTimeMinutes: 2 },
+    { slug: 'the-ant-and-the-dove', title: 'The Ant and the Dove', level: 'A2', readingTimeMinutes: 1 },
+    { slug: 'distributed-clocks', title: 'Distributed Clocks', level: 'B1', readingTimeMinutes: 4 },
+    { slug: 'nextjs-architecture', title: 'Full-Stack & Next.js', level: 'B2', readingTimeMinutes: 6 },
+    { slug: 'the-history-of-english', title: 'A History of English', level: 'C2', readingTimeMinutes: 9 },
+  ],
+  // The four fields the route projects from `VOCAB_BANKS`, at the levels `data/vocab.ts`
+  // actually carries: one A1 and three B2. `test/placementRoute.test.ts` is what holds
+  // those tags against the data — a fixture is a shape, not a contract, and this one is
+  // here to pin the *ranking*, which is the part this file can see.
+  banks: [
+    { slug: 'oxford-essential', title: 'Oxford 3000 Essentials', level: 'A1', wordCount: 8 },
+    { slug: 'ielts-academic', title: 'IELTS Academic Vocabulary', level: 'B2', wordCount: 5 },
+    { slug: 'tech-developer', title: 'Developer & Tech English', level: 'B2', wordCount: 5 },
+    {
+      slug: 'fullstack-cloud-engineering',
+      title: 'Full-Stack, RAG & Cloud Terminology',
+      level: 'B2',
+      wordCount: 8,
+    },
+  ],
 };
 
 /**
@@ -87,7 +112,12 @@ const result = (
  * in: the result card replaces the form, so by the time there is a result there is no
  * textarea left to type into.
  */
-async function submitBody(body: unknown, status = 200, writing = ''): Promise<HTMLElement> {
+async function submitBody(
+  body: unknown,
+  status = 200,
+  writing = '',
+  bundle: unknown = BUNDLE,
+): Promise<HTMLElement> {
   // A visit on which the learner answers the quiz, which now means *starting* with nothing
   // stored: the page restores the last result on mount, so a second submission inside one
   // test would come back to the result card instead of the form and find no `form` to send.
@@ -100,7 +130,7 @@ async function submitBody(body: unknown, status = 200, writing = ''): Promise<HT
           status,
           headers: { 'content-type': 'application/json' },
         })
-      : new Response(JSON.stringify(BUNDLE), {
+      : new Response(JSON.stringify(bundle), {
           headers: { 'content-type': 'application/json' },
         }),
   );
@@ -182,7 +212,8 @@ function reload(): void {
 const submitAndRead = (
   writingOutcome: 'graded' | 'skipped' | 'failed',
   objective = BENIGN,
-) => submitBody(result(writingOutcome, objective));
+  bundle: unknown = BUNDLE,
+) => submitBody(result(writingOutcome, objective), 200, '', bundle);
 
 /**
  * A placement the writing pulled down, as `decideLevel` records it.
@@ -697,5 +728,247 @@ describe('reopening the page', () => {
     const host = await mountPage();
 
     expect(host.querySelectorAll('fieldset')).toHaveLength(BUNDLE.questions.length);
+  });
+});
+
+/**
+ * The result card used to end at two buttons, and both were the same whatever level you
+ * were given: "Retake the test" and a flat link to `/vocab`. The test computed a level,
+ * stored it, and printed it in thirty-point type — and every story in the catalog carries a
+ * level, and nothing ever read it. The one thing a placement is for is being told what to
+ * practise next, and the page had no answer.
+ *
+ * The catalog cannot be imported by this page: `data/stories.ts` is 32K of prose, and a
+ * client import to pick three titles would ship all of it to render three links. So the
+ * route projects four fields per story and the page ranks those.
+ */
+describe('where to practise next', () => {
+  /** The links the card offers, in the order it renders them. */
+  const startingHrefs = (host: HTMLElement) =>
+    [...host.querySelectorAll('a[href^="/stories/"]')].map((a) => a.getAttribute('href'));
+
+  /** A placed-B1 learner: A2, A2 and B1 are at or below; the B2 is not. */
+  it('offers stories at or below the placed level, hardest first', async () => {
+    const host = await submitAndRead('graded', QUIZ_AT_B1);
+
+    expect(startingHrefs(host)).toEqual([
+      '/stories/distributed-clocks',
+      '/stories/the-lazy-crab',
+      '/stories/the-ant-and-the-dove',
+    ]);
+  });
+
+  /**
+   * The control on the ceiling, and on the order.
+   *
+   * At or below is a maximum, not a target — a B1 learner handed the gentlest story in the
+   * app has been told something false about themselves and then given material that cannot
+   * check it. B1 first is what makes "at or below" reachable rather than merely unbroken.
+   */
+  it('leaves the harder story to the harder level', async () => {
+    const host = await submitAndRead('graded', QUIZ_AT_B1);
+
+    expect(text(host)).not.toContain('Full-Stack & Next.js');
+    expect(text(host)).toContain('Harder stories are one level up');
+  });
+
+  /**
+   * A learner placed A1 has no story at or below their level: the gentlest in the catalog
+   * is A2. That is a fact about the corpus, not a failure, and the card has to say it —
+   * three A2 links under a headline reading A1 would look like the card had ignored the
+   * placement, which is the one thing a result card must not do.
+   */
+  it('tells an A1 learner the catalog starts above them', async () => {
+    const host = await submitAndRead('graded');
+
+    expect(headline(host)).toBe('A1');
+    expect(text(host)).toContain('The story catalog starts at A2');
+    // Gentlest end first, or "the gentlest we have" is a claim the links contradict. The
+    // two A2s tie, so their relative order is whatever the catalog says it is.
+    expect(startingHrefs(host)).toEqual([
+      '/stories/the-lazy-crab',
+      '/stories/the-ant-and-the-dove',
+      '/stories/distributed-clocks',
+    ]);
+  });
+
+  /**
+   * The ladder the recommendation ranks on has to reach the top.
+   *
+   * `CEFR_RANKS` was written by hand and stopped at C1, so a story at C2 came back
+   * `indexOf === -1` and sorted *below A1* — the hardest text in the app, ranked as the
+   * gentlest thing in it. No story carries C2, so the bug had no symptom and every other
+   * test in this file passed straight over it.
+   *
+   * Only the A1 half catches it, and the canary says so. A B1 learner ranks the catalog
+   * descending and takes the first three, so a C2 sitting at -1 lands last and `slice`
+   * discards it — the B1 assertion below is a control on the other axis, not a second
+   * witness. The A1 learner is the one who sees it: with nothing at or below their level
+   * the whole catalog is sorted *ascending*, and -1 is first out of it, on a card whose
+   * caption reads "these are the gentlest we have".
+   */
+  it('never offers the hardest level to a beginner', async () => {
+    expect(text(await submitAndRead('graded'))).not.toContain('A History of English');
+    // The control, and it is a real one rather than a second witness: nothing about a B1
+    // learner being offered C2 would be wrong, so this only holds that the ladder is not
+    // ranking C2 as *easier* than B1 somewhere a `slice` would not hide.
+    expect(text(await submitAndRead('graded', QUIZ_AT_B1))).not.toContain('A History of English');
+  });
+
+  /**
+   * A bundle cached from the previous build has no `catalog` key at all. The field is
+   * optional for that reason, and the card must still render the whole result without it —
+   * the placement is the product; the recommendations are an addition to it.
+   */  it('renders the placement on a bundle that predates the catalog', async () => {
+    // `undefined` rather than a deleted key, so the fixture stays the one object every
+    // other test reads. `JSON.stringify` drops it, which is the whole trick.
+    const withoutCatalog = { ...BUNDLE, catalog: undefined };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(withoutCatalog), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+
+    const host = await mountPage();
+
+    expect(host.querySelectorAll('fieldset')).toHaveLength(BUNDLE.questions.length);
+    expect(host.querySelector('a[href^="/stories/"]')).toBeNull();
+  });
+});
+
+/**
+ * The other half of the same question. `/vocab` was one flat link at the foot of the card
+ * and stayed that way after the stories were ranked: four banks, three of them B2, and a
+ * learner placed at B1 had no way to learn that the tab called "IELTS Academic" was the one
+ * they could not use. The banks now answer to the same ladder the stories do, and the ones
+ * held back are named rather than quietly omitted — a link that is missing is a link the
+ * page chose to withhold, and the learner cannot tell that from a bank that does not exist.
+ */
+describe('which word bank', () => {
+  /**
+   * The bank links, in order. Scoped to `/vocab?bank=` so the `/vocab` button at the foot of
+   * the card — which every result has had since before this describe existed — cannot be
+   * mistaken for a recommendation.
+   */
+  const bankHrefs = (host: HTMLElement) =>
+    [...host.querySelectorAll('a[href^="/vocab?bank="]')].map((a) => a.getAttribute('href'));
+
+  it('offers the bank at or below the placed level, as a deep link into it', async () => {
+    const host = await submitAndRead('graded', QUIZ_AT_B1);
+
+    // The `?bank=` and not a bare `/vocab`: a link to the page still makes the learner
+    // choose again, and the tab that opens is whichever one the URL happened to name last.
+    expect(bankHrefs(host)).toEqual(['/vocab?bank=oxford-essential']);
+    expect(text(host)).toContain('Chosen for B1.');
+  });
+
+  /**
+   * The ceiling, at the hardest level the quiz can award.
+   *
+   * All three B2 banks are here in the fixture and none is offered. A B1 learner handed
+   * "IELTS Academic Vocabulary" has been told something false about themselves and then
+   * given a drill of `corroborate` — the same failure the story ranking exists to prevent,
+   * and the one that would be invisible on the card: a bank with no ceiling reads exactly
+   * like a bank at their level.
+   */
+  it('never offers a bank above the placed level', async () => {
+    expect(bankHrefs(await submitAndRead('graded', QUIZ_AT_B1))).toEqual([
+      '/vocab?bank=oxford-essential',
+    ]);
+    expect(text(await submitAndRead('graded', QUIZ_AT_B1))).not.toContain('IELTS Academic');
+  });
+
+  /**
+   * Saying which ones were held back, and where they sit.
+   *
+   * "Chosen for B1" on its own reads as though there was one bank in the app. The count
+   * and the level are what turn a selection into a decision the learner can check — and
+   * the level is the useful half: it is the difference between "try something else" and
+   * "you are not ready for that yet, and here is how you will know".
+   *
+   * The count is the part that rots. Three B2 banks become four, or one of them is
+   * retagged, and a sentence hard-coding either would go on telling the learner a number
+   * the page has just contradicted.
+   */
+  it('names the banks it did not offer, and the level they sit at', async () => {
+    const host = await submitAndRead('graded', QUIZ_AT_B1);
+
+    expect(text(host)).toContain('The other 3 banks sit at B2 — above your level.');
+  });
+
+  it('reports a level in ladder order, once, however many banks carry it', async () => {
+    const host = await submitAndRead('graded', BENIGN, {
+      ...BUNDLE,
+      banks: [
+        ...BUNDLE.banks,
+        { slug: 'a-fourth', title: 'A Fourth Bank', level: 'B2', wordCount: 4 },
+        { slug: 'a-c1', title: 'A C1 Bank', level: 'C1', wordCount: 4 },
+      ],
+    });
+
+    expect(text(host)).toContain('The other 5 banks sit at B2, C1 — above your level.');
+    expect(bankHrefs(host)).toEqual(['/vocab?bank=oxford-essential']);
+  });
+
+  /**
+   * The no-withholding case, which the corpus cannot currently produce.
+   *
+   * Every bank at or below the level leaves nothing to name, so the sentence must not name
+   * anything — a hard-coded "the other N banks" here would print "The other 0 banks sit at"
+   * under a card that offered four links. Retagging the Oxford bank upward would do it.
+   */
+  it('says nothing about withheld banks when there are none', async () => {
+    const host = await submitAndRead('graded', BENIGN, {
+      ...BUNDLE,
+      banks: [
+        { slug: 'oxford-essential', title: 'Oxford 3000 Essentials', level: 'A1', wordCount: 8 },
+        { slug: 'tech-developer', title: 'Developer & Tech English', level: 'A1', wordCount: 5 },
+      ],
+    });
+
+    expect(bankHrefs(host)).toEqual([
+      '/vocab?bank=oxford-essential',
+      '/vocab?bank=tech-developer',
+    ]);
+    expect(text(host)).toContain('Chosen for A1.');
+    expect(text(host)).not.toContain('The other');
+  });
+
+  /**
+   * The word count is on the card, and singular is singular.
+   *
+   * It is the only number about a bank the learner gets before committing, and it comes
+   * from `words.length` in the projection rather than a literal. A bank holding one word
+   * would otherwise offer "1 words" in the row that is asking them to type it.
+   */
+  it('says how many words the bank holds, in the right number', async () => {
+    expect(text(await submitAndRead('graded', QUIZ_AT_B1))).toContain('A1 · 8 words');
+
+    const single = await submitAndRead('graded', BENIGN, {
+      ...BUNDLE,
+      banks: [{ slug: 'solo', title: 'A One-Word Bank', level: 'A1', wordCount: 1 }],
+    });
+
+    expect(text(single)).toContain('A1 · 1 word');
+  });
+
+  /**
+   * A bundle cached from before this field existed. The key is optional for that reason,
+   * and the result has to render whole without it — the same argument as the catalog, and
+   * the test that keeps the two from being treated as one or the other.
+   */
+  it('renders the placement on a bundle that predates the banks', async () => {
+    // `undefined` rather than a deleted key, so the fixture stays the one object every
+    // other test reads. `JSON.stringify` drops it, which is the whole trick.
+    const host = await submitAndRead('graded', BENIGN, { ...BUNDLE, banks: undefined });
+
+    expect(headline(host)).toBe('A1');
+    expect(bankHrefs(host)).toEqual([]);
+    // The stories are unaffected: an absent `banks` must not take the catalog with it.
+    expect(host.querySelectorAll('a[href^="/stories/"]').length).toBeGreaterThan(0);
   });
 });

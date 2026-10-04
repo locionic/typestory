@@ -29,12 +29,13 @@ TypeStory is an interactive, open-access keyboard typing and language learning p
    - Automated local persistence tracking WPM trends, accuracy averages, session duration, and total words typed.
    - Daily practice streak counter (`🔥 X days`) in the navbar.
    - Milestone badges for speed thresholds (50+ WPM, 75+ WPM), 100% accuracy, and typing consistency.
-   - Full session history log with quick-reset capabilities.
+   - A **Speed Trend** sparkline over the stored session window, labelled with that window and with both ends of its axis — the axis does not start at zero, so the low and the high are printed rather than left for the reader to infer. It appears once there are two sessions to join.
+   - Full session history log with quick-reset capabilities, and a **Download CSV** button for taking the numbers elsewhere. The backup code is restore-only — it exists to get you back in, not to move your data out — so the CSV is the only way to reach the rows as a table. It is an export of the *stored window*, capped at the same 100 sessions the stats cards average over, and the panel's "Recent Sessions (N)" heading is what keeps that honest. Titles are quoted per RFC 4180, carry a UTF-8 BOM so Excel reads them as UTF-8 rather than the local codepage, and are defused with a leading apostrophe when they start with `=`, `+`, `-` or `@` — Excel and Sheets evaluate such a cell on *open*, and on `/custom` the title comes from text the learner pasted.
 
 6. **Interactive Stories Catalog & Search:**
    - Real-time search by story title, author, or keywords.
    - Category filtering (Fables, Literature, Tech & History, Speeches & Essays, Daily Dialogue) and CEFR level filter (Beginner, Intermediate, Advanced).
-   - Word count and reading-time sorting.
+   - Word count sorting (recommended / shortest / longest), with the reading time shown on every card. There is no separate reading-time sort: `readingTimeMinutes` is derived from `wordCount`, so the ordering would be the same one under a second name.
    - Fluent keyboard flow: press `Enter` on completion cards to immediately advance to the next paragraph or word.
 
 7. **Vocabulary Drills & Word Banks:**
@@ -62,7 +63,7 @@ TypeStory is an interactive, open-access keyboard typing and language learning p
    - Rich JSON-LD structured data: `WebApplication` and `CreativeWork` schemas on every story page.
    - Automated `sitemap.xml` and `robots.txt` generator.
    - OpenGraph and Twitter social preview metadata cards.
-   - Semantic HTML5 heading hierarchy and educational FAQ accordion optimized for long-tail Google search snippets.
+   - Semantic HTML5 heading hierarchy and an educational FAQ section optimized for long-tail Google search snippets. It is a section, not an accordion: `<details>` would put each answer behind a click, which is the opposite of what this line is for. The three answers are also checked against the corpus — the first names Azure, and the DevOps story carries it.
 
 ---
 
@@ -114,11 +115,16 @@ npm run start
 ## Testing
 
 ```bash
-npm test           # unit tests — stats, typing store, audio engine (jsdom, ~2s)
+npm test           # typecheck, then unit tests — stats, typing store, audio engine (jsdom, ~4s)
 npm run test:e2e   # end-to-end smoke test — drives real Chrome against a production build
 ```
 
-`npm test` needs nothing but the installed dependencies. `npm run test:e2e` boots `next start` on
+`npm test` needs nothing but the installed dependencies. It runs `tsc --noEmit` first, because Vitest
+transpiles rather than typechecks: a type error is invisible to the suite, so `vitest run` on its own
+reports a green run for code that will not build. Use `npm run test:watch` for the fast loop — it skips
+the typecheck.
+
+`npm run test:e2e` boots `next start` on
 a free port and drives real Chrome through the app — ten journeys covering a full typed passage and
 its recorded session, the placement test, a server-side backup-and-restore, every route on a phone
 viewport, and the two panels' behaviour when the model key is missing. Run `npm run build` first. It
@@ -178,8 +184,8 @@ the *narrower* of the two — a learner who aces the quiz but writes at A1 is pl
 
 | Method | Path | Result |
 | --- | --- | --- |
-| `GET` | `/api/placement` | `200 { questions, writingTask }` — bank with no answer key |
-| `POST` | `/api/placement` | `200 { level, cappedByWriting, objective, writing }` · `400` · `415` · `502` |
+| `GET` | `/api/placement` | `200 { questions, writingTask, maxWritingChars, levels, passRate, catalog }` — bank with no answer key |
+| `POST` | `/api/placement` | `200 { level, cappedByWriting, objective, writing, writingOutcome }` · `400` · `415` |
 
 ```bash
 curl -X POST http://localhost:3000/api/placement \
@@ -188,7 +194,12 @@ curl -X POST http://localhost:3000/api/placement \
 ```
 
 The learner-facing page is `/placement`; it fetches the bank from `GET`, posts the answers,
-and renders the level, the per-level breakdown, and any writing feedback.
+and renders the level, the per-level breakdown, any writing feedback, and three stories to
+start on. `catalog` is `STORIES` projected to `{ slug, title, level, readingTimeMinutes }`:
+the page ranks those to recommend something at or below the placed level, hardest first, and
+a client import of `data/stories.ts` would have put 32K of prose in the bundle to render three
+links. An A1 is placed below the whole corpus — the gentlest story is A2 — so it is shown the
+three gentlest and told the catalog starts above them.
 
 **Scoring.** Each of the three levels has four questions; a level is held at 3-of-4
 (`PASS_RATE`). The level is the highest one passed *with every level below it also passed* — 3/4 on
@@ -197,8 +208,11 @@ writing never raises the result.
 
 **No key, no AI.** Set `ANTHROPIC_API_KEY` to grade the writing. Without it the quiz alone still
 places someone and `writing` comes back `null` — TypeStory is client-side-first and free, so an AI
-key must never gate the core experience. The test suite mocks `lib/ai`, so `npm test` needs
-neither a key nor a network.
+key must never gate the core experience. `writingOutcome` is the field that says *which* of the
+four things made it null: `'skipped'` is the one voluntary case, an empty box, and everything that
+went wrong after a learner chose to write something is `'failed'`, including a machine that cannot
+authenticate. "The writing check is optional" is false of an essay that was thrown away. The test
+suite mocks `lib/ai`, so `npm test` needs neither a key nor a network.
 
 **`lib/ai.ts` is the one seam every AI feature goes through:** system prompt in, user message in,
 JSON Schema in, decoded JSON out, plus optional `history` for the one multi-turn caller. Routes depend
@@ -210,6 +224,16 @@ prose feedback is worth the extra thinking. Not streaming: every feature so far 
 few hundred tokens. A long-form tutor is the case that would earn it, and is a swap of `parse` for
 `stream` + `finalMessage()` here.
 
+**What bounds the spend.** Every route above is auth-less and reachable by anything with a `fetch`, so
+each POST is one metered Opus call with nothing in front of it. `lib/rate-limit.ts` is what answers
+instead: twenty calls a minute per `x-forwarded-for` address, and a `429` with a `Retry-After` for the
+one after. It is in-memory per process instance, so it bounds a casual loop rather than a determined
+attacker — the shared counter that would fix that sits behind the same call. `/api/placement` is the
+exception and does not refuse the request: its quiz is scored in code and reaches no model, so the
+ceiling sits at the grading call and a throttled essay degrades to `writingOutcome: 'failed'` with the
+learner still placed. A request that arrives with no proxy header at all is answered rather than
+counted, or a local `next dev` would lock its one user out.
+
 ---
 
 ## Writing Correction
@@ -220,7 +244,7 @@ The second AI feature, and the first to take `effort: 'high'`.
 | Method | Path | Result |
 | --- | --- | --- |
 | `GET` | `/api/writing` | `200 { minTextChars, maxTextChars }` — no prompt, no schema |
-| `POST` | `/api/writing` | `200 { report }` · `400` · `415` · `502` · `503` |
+| `POST` | `/api/writing` | `200 { report }` · `400` · `415` · `429` · `502` |
 
 ```bash
 curl -X POST http://localhost:3000/api/writing \
@@ -239,9 +263,15 @@ contents cannot read as instructions, and the reply is treated as untrusted: the
 makes output *shaped*, not *correct*. Nothing shorter than 20 characters is graded — that is a
 wasted model call, not a correction.
 
-**No key, no AI.** Same rule as placement: set `ANTHROPIC_API_KEY` and the route answers `503
-ai_not_configured` — an unconfigured key is not an outage, so it is not reported as one — while the
-page says so plainly and everything else keeps working.
+**No key, no AI — but an outage is reported as one.** Set `ANTHROPIC_API_KEY` and the route
+calls the model. This used to answer `503 ai_not_configured` *before* `createModelClient`, on the
+theory that an unconfigured key is not an outage and should not be reported as one. The SDK never
+needed the key — `new Anthropic()` resolves an `ant auth login` credential chain on first *use* —
+so that short-circuit could not stop a call that was going to fail; it could only refuse the
+machines whose credential was not an env var, which are exactly the ones that would have worked.
+There is no `ai_not_configured` code and no `503` on any route: a machine that cannot
+authenticate degrades to `502 ai_unavailable`, which is a claim about the world and has to mean
+it. Placement, whose half is optional, degrades instead — see below.
 
 ---
 
@@ -253,7 +283,7 @@ nature; "why did it say that?" and "and here?" only mean something against the t
 | Method | Path | Result |
 | --- | --- | --- |
 | `GET` | `/api/tutor` | `200 { maxMessageChars, maxTurns }` — no prompt, no schema |
-| `POST` | `/api/tutor` | `200 { reply }` · `400` · `415` · `502` · `503` |
+| `POST` | `/api/tutor` | `200 { reply }` · `400` · `415` · `429` · `502` |
 
 ```bash
 curl -X POST http://localhost:3000/api/tutor \

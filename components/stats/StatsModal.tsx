@@ -15,8 +15,10 @@ import {
   CloudOff,
   Copy,
   Download,
+  TrendingUp,
 } from 'lucide-react';
 import { useUserStats, clearUserStats, liveStreak, saveUserStats } from '../../lib/stats';
+import { downloadSessionsCsv } from '../../lib/csv';
 import {
   useBackupCode,
   useBackupPushFailed,
@@ -35,6 +37,56 @@ interface StatsModalProps {
 
 /** The dialog's name, wired to its own heading — one constant so the two cannot disagree. */
 const STATS_TITLE_ID = 'stats-modal-title';
+
+/** The trend's own coordinate space, before `preserveAspectRatio="none"` stretches it. */
+const TREND_W = 300;
+const TREND_H = 60;
+const TREND_PAD = 6;
+
+/**
+ * Words per minute across the stored window, as SVG coordinates.
+ *
+ * The four cards above it are all a single moment: a streak, a peak, an average, a total.
+ * None of them says which way the number is going, and that is the question a practice log
+ * exists to answer. One `polyline` over sessions already in memory — no chart library, which
+ * would be a dependency larger than the feature and would want one of its own for the
+ * responsive case this solves in one attribute.
+ *
+ * **The axis does not start at zero, and both of its ends are printed for exactly that
+ * reason.** A zero-based WPM axis spends half the plot on speeds nobody in the panel ever
+ * typed, so six weeks of steady improvement draws as a flat line — the chart's job done
+ * backwards. Truncating is the usual choice and the usual lie; here the low and the high
+ * are both on screen under the plot, so the shape can be dramatic and the numbers beside
+ * it cannot be, and a learner reading the two together is not misled by either. It is the
+ * same bargain the accuracy card's `sessionWindow` makes about its window, and this block
+ * carries that same label rather than a second sentence about it.
+ *
+ * Two or more values, always: the caller checks, because `values.length - 1` is the
+ * denominator and a single session would divide by zero.
+ */
+function wpmTrend(values: readonly number[]) {
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  // `|| 1` rather than a branch for the flat case, and a flat history is a real one: the
+  // same speed in every session. Dividing by the fallback centres the line, where a guard
+  // clause would have to pick an arbitrary range — and skipping the division altogether
+  // prints a path of NaN, which SVG renders as nothing at all. That is a chart occupying
+  // a band of the panel, with two labels claiming a range, and no line in between.
+  const span = high - low || 1;
+  const inner = TREND_W - TREND_PAD * 2;
+  return {
+    low,
+    high,
+    points: values.map((value, i) => [
+      // Rounded to a tenth. A path of seventeen-digit coordinates is unreadable in the DOM
+      // and in a test, and the sub-pixel difference is not a thing anyone can see.
+      Math.round((TREND_PAD + (i * inner) / (values.length - 1)) * 10) / 10,
+      Math.round(
+        (TREND_PAD + (TREND_H - TREND_PAD * 2) * (1 - (value - low) / span)) * 10,
+      ) / 10,
+    ]),
+  };
+}
 
 /**
  * The unit a count is counted in, so one does not arrive as a plural.
@@ -256,6 +308,15 @@ export default function StatsModal({ isOpen, onClose }: StatsModalProps) {
   const sessionCount = stats.sessions.length;
   const sessionWindow = `Last ${sessionCount} ${unit(sessionCount, 'session')}`;
 
+  // Oldest first, and only once there are two to draw. One session is a point, a polyline
+  // of one point is nothing, and a chart that occupies a band of the panel with a single
+  // dot in it is worse than no chart — the one session's number is already on the cards
+  // above and in the row below.
+  const trend =
+    stats.sessions.length > 1
+      ? wpmTrend([...stats.sessions].reverse().map((session) => session.wpm))
+      : null;
+
   const totalTime =
     stats.totalTimeSpentSeconds < 60
       ? `${stats.totalTimeSpentSeconds}s`
@@ -438,6 +499,55 @@ export default function StatsModal({ isOpen, onClose }: StatsModalProps) {
             </div>
           </div>
 
+          {/* Between the cards and the backup panel, because it belongs with the glance:
+              four numbers and then the shape of them. The backup block below is a
+              settings panel, and a chart under it would read as part of it. */}
+          {trend && (
+            <div className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-900/30 dark:bg-indigo-950/20">
+              <div className="flex items-center justify-between">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-400">
+                  <TrendingUp className="h-4 w-4 text-indigo-500" />
+                  <span>Speed Trend</span>
+                </h3>
+                {/* `sessionWindow`, the constant the accuracy and speed cards already use,
+                    not a second sentence about the same window. */}
+                <span className="text-[10px] text-indigo-700/80 dark:text-indigo-400/70">
+                  {sessionWindow}
+                </span>
+              </div>
+              {/* `preserveAspectRatio="none"` stretches the 300×60 viewBox to whatever
+                  width the panel has, and `non-scaling-stroke` is what stops that from
+                  also stretching the line — without it the stroke thins to a hairline on a
+                  wide panel and fattens on a narrow one. The coordinates stay in viewBox
+                  space, so the geometry below is the same whatever the screen is. */}
+              <svg
+                viewBox={`0 0 ${TREND_W} ${TREND_H}`}
+                preserveAspectRatio="none"
+                className="mt-3 h-16 w-full"
+                role="img"
+                aria-label={`Words per minute over your ${sessionWindow.toLowerCase()}, ranging from ${trend.low} to ${trend.high}.`}
+              >
+                <polyline
+                  points={trend.points.map(([x, y]) => `${x},${y}`).join(' ')}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                  className="text-indigo-500 dark:text-indigo-400"
+                />
+              </svg>
+              {/* The axis ends, in the order they appear on it. This is what makes the
+                  truncated scale above honest, and it is the reason the block is not just
+                  the line. */}
+              <div className="mt-1.5 flex items-center justify-between text-[10px] text-indigo-700/80 dark:text-indigo-400/70">
+                <span>{trend.low} wpm</span>
+                <span>{trend.high} wpm</span>
+              </div>
+            </div>
+          )}
+
           {/* Progress Backup */}
           <div className="rounded-2xl border border-gray-200 bg-gray-50/40 p-4 dark:border-gray-800 dark:bg-gray-800/40">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -603,29 +713,45 @@ export default function StatsModal({ isOpen, onClose }: StatsModalProps) {
                 Recent Sessions ({stats.sessions.length})
               </h3>
               {stats.sessions.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Names three things, because the reset takes three: this removes the
-                    // whole stored record, and `dailyStreak` is in it. It is also the only
-                    // one of the three that cannot be rebuilt by doing the thing — a cleared
-                    // history comes back after one more passage, a streak comes back a day
-                    // at a time — so the confirmation says so rather than leaving the
-                    // learner to find out. See test/statsModal.test.ts.
-                    if (
-                      confirm(
-                        'Reset your typing stats, session history and streak? ' +
-                          'The streak cannot be rebuilt by practising — it takes one day per day.',
-                      )
-                    ) {
-                      clearUserStats();
-                    }
-                  }}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-rose-500 hover:text-rose-600"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  <span>Reset Stats</span>
-                </button>
+                <div className="flex items-center gap-3">
+                  {/* Beside the list it exports and under the heading that names its
+                      scope: `stats.sessions` is the window, capped at MAX_SESSIONS, so a
+                      learner with more practice than that gets their recent runs and no
+                      earlier. "Recent Sessions (100)" directly above is what keeps the
+                      button from reading as an export of all time, which is the one claim
+                      this file cannot make. */}
+                  <button
+                    type="button"
+                    onClick={() => downloadSessionsCsv(stats.sessions)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+                  >
+                    <Download className="h-3 w-3" />
+                    <span>Download CSV</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Names three things, because the reset takes three: this removes the
+                      // whole stored record, and `dailyStreak` is in it. It is also the only
+                      // one of the three that cannot be rebuilt by doing the thing — a cleared
+                      // history comes back after one more passage, a streak comes back a day
+                      // at a time — so the confirmation says so rather than leaving the
+                      // learner to find out. See test/statsModal.test.ts.
+                      if (
+                        confirm(
+                          'Reset your typing stats, session history and streak? ' +
+                            'The streak cannot be rebuilt by practising — it takes one day per day.',
+                        )
+                      ) {
+                        clearUserStats();
+                      }
+                    }}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-rose-500 hover:text-rose-600"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    <span>Reset Stats</span>
+                  </button>
+                </div>
               )}
             </div>
 

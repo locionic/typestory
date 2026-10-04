@@ -1,4 +1,5 @@
 import { aiFailureCode, createModelClient } from '../../../lib/ai';
+import { rateLimited } from '../../../lib/rate-limit';
 import {
   MAX_MESSAGE_CHARS,
   MAX_TURNS,
@@ -39,6 +40,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Ahead of the content-type check, which is the cheaper thing to lose: a chat turn is
+  // the most expensive request this app serves — twelve turns of history to think over
+  // at the highest effort — and it is reachable in a loop by anything with a fetch.
+  // See lib/rate-limit.ts.
+  const throttled = rateLimited(request);
+  if (throttled) return throttled;
+
   if (!request.headers.get('content-type')?.toLowerCase().includes('application/json')) {
     return json({ error: 'unsupported_media_type' }, 415);
   }

@@ -21,6 +21,44 @@ export const SAMPLES = [
   },
 ];
 
+/** Where the draft waits out a refresh. Per device: never in the backup payload. */
+const DRAFT_KEY = 'typestory:custom-draft';
+
+/**
+ * The passage the learner pasted, which a refresh used to take with it.
+ *
+ * The store below is what made this page survive *navigation*: it is a module singleton, so
+ * clicking "Stories" and coming back left the passage and the board alone. A refresh is the
+ * other half of the same journey and got none of it — the store is rebuilt from nothing, so a
+ * chapter pasted out of a PDF and drilled for ten minutes was gone at F5, with the only copy
+ * in the learner's clipboard and the file they had it in. `/placement` and `/writing` now keep
+ * their work across a reload; this page is the one that holds the learner's own text and
+ * does not, which is the same defect with none of the arguments against it.
+ *
+ * `null` means "never stored", which is not the same as "stored empty". A learner who
+ * clears the box to type a fresh paste must not find Sample 1 back in it on reload, and
+ * `null` is what lets the two be told apart.
+ */
+function loadDraft(): string | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(text: string): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(text));
+  } catch {
+    // A browser that refuses the write still shows the passage and still drills it; it just
+    // will not survive a refresh. Nothing to report, nothing to retry.
+  }
+}
+
 export default function CustomTextPage() {
   /**
    * What the store already holds, read once at mount.
@@ -42,26 +80,33 @@ export default function CustomTextPage() {
   const [held] = useState(() => useTypingStore.getState());
 
   /**
-   * Whether this mount is restoring a custom session rather than opening the page fresh.
+   * What the textarea opens on, decided once and read by both initialisers below.
    *
-   * Both of the initialisers below answer to it, and they have to answer to the *same* one.
-   * They did not at first: `presetIndex` was derived from whatever passage the store held while
-   * `inputText` was gated on `sourceType`, so a store left holding Sample 2 — after any custom
-   * run, since `resetSession` keeps the passage — opened this page with the sample in the
-   * textarea and Sample 2 marked as the loaded preset. `isPresetText` compares the two, found
-   * them different, and recorded the session as "Custom Text" for a passage nobody had pasted.
+   * Three sources, in order of how deliberate each one is: a run in the store is what the
+   * learner is *currently* drilling, a stored draft is what they were writing for the next
+   * one, and neither means this is a first visit and the opening sample is the answer.
+   *
+   * This is the fix for the two initialisers disagreeing, described at length in the comment
+   * that used to sit here: `presetIndex` read the store while `inputText` was gated on
+   * `sourceType`, so a store holding Sample 2 opened the page with the sample in the box and
+   * a different sample marked as loaded, and the mismatch was recorded as "Custom Text" for a
+   * passage nobody had pasted. The disagreement is now impossible rather than avoided — both
+   * read one value — and a third source could not reintroduce it.
    */
+  const [draft] = useState(loadDraft);
   const restored = held.sourceType === 'custom';
+  const [initialText] = useState(restored ? held.targetText : (draft ?? SAMPLES[0].text));
+  const [inputText, setInputText] = useState(initialText);
 
   /**
-   * Which sample the held passage is, so the restored text keeps its preset's name.
+   * Which sample the opening text is, so a restored draft keeps its preset's name.
    *
    * `findIndex` answers -1 for a real paste, and -1 indexes `SAMPLES` to `undefined`, so the
    * fallback is written here rather than left to the `isPresetText` comparison below — which
    * would be reading `undefined.text` and throwing on the first render.
    */
   const [presetIndex, setPresetIndex] = useState(() => {
-    const found = restored ? SAMPLES.findIndex((s) => s.text === held.targetText) : -1;
+    const found = SAMPLES.findIndex((s) => s.text === initialText);
     return found === -1 ? 0 : found;
   });
 
@@ -85,7 +130,6 @@ export default function CustomTextPage() {
   const [active, setActive] = useState<{ text: string; title: string } | null>(
     restored ? { text: held.targetText, title: held.title } : null,
   );
-  const [inputText, setInputText] = useState(restored ? held.targetText : SAMPLES[0].text);
   // Selected, not destructured — see the Navbar. Nothing this page renders reads the
   // typing session, so it should not rebuild when the session changes.
   const loadCustomText = useTypingStore((s) => s.loadCustomText);
@@ -166,6 +210,20 @@ export default function CustomTextPage() {
     setActive({ text: inputText, title: sessionTitle });
   };
 
+  /**
+   * The one way the draft changes, so that it is persisted by construction.
+   *
+   * Two call sites write it — the textarea and the three preset buttons — and a save
+   * remembered at one and forgotten at the other is exactly the kind of drift this page has
+   * spent its history being bitten by. `Start` is deliberately *not* one of them: it does not
+   * change the draft, and the note on `active` above is the reason the two are allowed to
+   * hold different text.
+   */
+  const editDraft = (value: string) => {
+    setInputText(value);
+    saveDraft(value);
+  };
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
       {/* Header */}
@@ -196,7 +254,7 @@ export default function CustomTextPage() {
                 key={idx}
                 type="button"
                 onClick={() => {
-                  setInputText(s.text);
+                  editDraft(s.text);
                   setPresetIndex(idx);
                 }}
                 className="rounded-lg bg-gray-100 px-2 py-1 font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -211,7 +269,7 @@ export default function CustomTextPage() {
           id="custom-input"
           rows={5}
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          onChange={(e) => editDraft(e.target.value)}
           placeholder="Paste any article, sentence, or dialogue..."
           className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 font-mono text-sm leading-relaxed text-gray-900 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-gray-800 dark:bg-gray-800 dark:text-gray-100"
         />

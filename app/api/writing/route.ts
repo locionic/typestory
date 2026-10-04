@@ -1,4 +1,5 @@
 import { aiFailureCode, createModelClient } from '../../../lib/ai';
+import { rateLimited } from '../../../lib/rate-limit';
 import {
   CORRECTION_SCHEMA,
   MAX_TEXT_CHARS,
@@ -36,6 +37,12 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Ahead of everything else here, the content-type check included: the whole cost of
+  // this handler is the `generate` call below, and there is no account in front of it.
+  // See lib/rate-limit.ts for why the ceiling is the only thing there is.
+  const throttled = rateLimited(request);
+  if (throttled) return throttled;
+
   if (!request.headers.get('content-type')?.toLowerCase().includes('application/json')) {
     return json({ error: 'unsupported_media_type' }, 415);
   }

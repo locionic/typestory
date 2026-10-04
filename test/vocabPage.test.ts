@@ -307,6 +307,34 @@ describe('the bank tabs say which one is open', () => {
     expect(states.filter((s) => s === 'true')).toHaveLength(1);
     expect(states.filter((s) => s === 'false')).toHaveLength(VOCAB_BANKS.length - 1);
   });
+
+  /**
+   * The level is printed on the tab, and it is the tab's own text and not the card's.
+   *
+   * `tab(host, label)` matches on the title, so a level that rendered only somewhere else
+   * on the page would not be found by this test at all — which is the point of looking for
+   * it *here*. The placement result ranks banks by this number, and a learner opening
+   * `/vocab` has no other way to see what they are being asked to type: the bank names
+   * carry no difficulty claim ("Core Foundation" is a name, not a level), so a tag that
+   * lives in the data and nowhere on the screen is a tag only the code can read.
+   *
+   * The literal below is the same four judgements the route test spells out. Two tests
+   * holding one set of numbers is the cheap way to make a retag deliberate.
+   */
+  it('prints each bank CEFR level on its tab', async () => {
+    const host = await renderVocab('');
+
+    expect(
+      Object.fromEntries(
+        VOCAB_BANKS.map((bank) => [bank.title, tab(host, bank.title).textContent]),
+      ),
+    ).toEqual({
+      'Full-Stack, RAG & Cloud Terminology': '🚀Full-Stack, RAG & Cloud TerminologyB2',
+      'Oxford 3000 Essentials': '📚Oxford 3000 EssentialsA1',
+      'IELTS Academic Vocabulary': '🎓IELTS Academic VocabularyB2',
+      'Developer & Tech English': '💻Developer & Tech EnglishB2',
+    });
+  });
 });
 
 /** The text the typing board is asking the learner to type. */

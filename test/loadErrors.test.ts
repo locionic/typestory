@@ -19,6 +19,10 @@ const roots: { unmount: () => void }[] = [];
 
 afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount());
+  // `/writing` and `/placement` both restore their last work from localStorage on mount, so
+  // a test that left a draft or a result behind turns the next test's fresh mount into that
+  // state instead of the editor or the quiz.
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
