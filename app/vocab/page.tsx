@@ -108,7 +108,7 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
                     : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
                 }`}
               >
-
+                {option.level}
               </span>
             </button>
           );

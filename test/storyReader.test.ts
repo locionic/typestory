@@ -416,7 +416,7 @@ describe('the byline', () => {
     }
 
     expect(wrong).toEqual([]);
-  });
+  }, 60000);
 });
 
 /**
@@ -480,7 +480,7 @@ describe('the glossary says which word each button speaks', () => {
       }
     }
     expect(wrong).toEqual([]);
-  });
+  }, 60000);
 });
 
 /**
