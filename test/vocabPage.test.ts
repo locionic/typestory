@@ -337,6 +337,96 @@ describe('the bank tabs say which one is open', () => {
   });
 });
 
+/**
+ * The tabs that are on the page.
+ *
+ * Counted from the banks themselves rather than off a literal, and as a list rather than a
+ * lookup per title: the failure these tests are about is a bank silently missing from the
+ * row, and a per-title helper that throws on a missing button reads the same as one that
+ * throws for any other reason. The tab strip is the only way onto a bank, so what it holds
+ * is the page's reachability.
+ */
+function tabTitles(host: HTMLElement): string[] {
+  const levels = VOCAB_BANKS.map((bank) => bank.level);
+  return [...host.querySelectorAll('button')]
+    .filter((b) => levels.some((level) => b.textContent?.includes(level)))
+    .map((b) => b.textContent?.replace(/^\W+/, '').replace(/(A1|A2|B1|B2|C1|C2)$/, '') ?? '');
+}
+
+/** The level filter, found by the name a screen reader gets for it. */
+function levelFilter(host: HTMLElement): HTMLSelectElement {
+  const select = host.querySelector('select[aria-label="Filter word banks by proficiency level"]');
+  if (!select) throw new Error('no proficiency-level filter on the page');
+  return select as HTMLSelectElement;
+}
+
+describe('the proficiency-level filter', () => {
+  /**
+   * Nothing chosen, which is the state the page ships in.
+   *
+   * A filter whose default hid a bank would hide it from every learner who arrived without
+   * choosing a level, so this asserts the count and not merely that the control reads "All
+   * Levels".
+   */
+  it('shows every bank before anything is chosen', async () => {
+    const host = await renderVocab('');
+
+    expect(levelFilter(host).value).toBe('all');
+    expect(tabTitles(host)).toEqual(VOCAB_BANKS.map((bank) => bank.title));
+  });
+
+  /**
+   * The same judgement the story catalog filters on, applied to the same CEFR scale.
+   *
+   * The band is chosen the way a learner chooses it — through the control, by its option
+   * value — so the option list and the filtering it drives cannot disagree about what
+   * "intermediate" means.
+   */
+  it('narrows the tabs to the banks in the chosen band', async () => {
+    const host = await renderVocab('');
+    act(() => {
+      const select = levelFilter(host);
+      select.value = 'intermediate';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(tabTitles(host)).toEqual(
+      VOCAB_BANKS.filter((bank) => ['B1', 'B2'].includes(bank.level)).map((bank) => bank.title),
+    );
+  });
+
+  /**
+   * A band nothing is tagged with, which is the reachable case.
+   *
+   * The tab strip is how a bank is chosen, so filtering to C1–C2 leaves the drill below it
+   * loaded and unreachable with nothing on screen saying why. The line has to name the band
+   * that was asked for — otherwise the learner has a filter set and no way to tell which of
+   * the three emptied it — and it has to name the levels that do have banks, read off the
+   * data rather than written out, since writing them out is the version that goes stale.
+   */
+  it('says so when the chosen band has no banks', async () => {
+    const host = await renderVocab('');
+    act(() => {
+      const select = levelFilter(host);
+      select.value = 'advanced';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(tabTitles(host)).toEqual([]);
+
+    const present = [...new Set(VOCAB_BANKS.map((bank) => bank.level))].sort().join(', ');
+    const line = [...host.querySelectorAll('p')].find((p) => p.textContent?.includes(present));
+    expect(line?.textContent).toContain('Advanced (C1–C2)');
+    expect(line?.textContent).toContain(present);
+  });
+
+  it('is named for a screen reader, which has no other way to know what it filters', async () => {
+    const host = await renderVocab('');
+
+    expect(accessibleName(levelFilter(host))).toBe('Filter word banks by proficiency level');
+  });
+});
+
 /** The text the typing board is asking the learner to type. */
 const onBoard = () => useTypingStore.getState().targetText;
 

@@ -3,8 +3,9 @@
 import React, { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { VOCAB_BANKS, VocabCategory } from '../../data/vocab';
+import { CefrLevel } from '../../lib/types';
 import TypingEngine from '../../components/typing/TypingEngine';
-import { Bookmark, Volume2, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Bookmark, Volume2, ChevronRight, ChevronLeft, Filter } from 'lucide-react';
 import { soundEngine } from '../../lib/audio';
 
 /**
@@ -15,6 +16,25 @@ import { soundEngine } from '../../lib/audio';
  * disagree.
  */
 const HEADING = 'English Word Banks';
+
+/**
+ * The three proficiency bands, in the order a learner reads them.
+ *
+ * Same bands and same option text as `StoriesCatalog`'s `LEVELS`, because they are the
+ * same judgement about the same scale: a learner who has been filtered out of every story
+ * at one level on the catalog has not been offered a different meaning of it here.
+ */
+const LEVELS = [
+  { id: 'all', label: 'All Levels', cefs: [] as CefrLevel[] },
+  { id: 'beginner', label: 'Beginner (A1–A2)', cefs: ['A1', 'A2'] },
+  { id: 'intermediate', label: 'Intermediate (B1–B2)', cefs: ['B1', 'B2'] },
+  { id: 'advanced', label: 'Advanced (C1–C2)', cefs: ['C1', 'C2'] },
+];
+
+/** The band a filter value selects, for the two places that need it by name. */
+function levelById(id: string) {
+  return LEVELS.find((level) => level.id === id) ?? LEVELS[0];
+}
 
 /**
  * The bank this link asks for, falling back to the first.
@@ -37,8 +57,18 @@ function useLinkedBank(): VocabCategory {
 function VocabDrill({ bank }: { bank: VocabCategory }) {
   const router = useRouter();
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
+  // The tabs are the only way onto a bank, so narrowing them is filtering the page: this is
+  // state rather than part of `?bank=` because, unlike the open bank, this is a lens over the
+  // list and not a destination — nothing links to "the vocab page, filtered to B2", and
+  // putting it in the URL would mean every tab click also rewrote it.
+  const [selectedLevel, setSelectedLevel] = useState('all');
   const words = bank.words;
   const currentItem = words[currentWordIndex] || words[0];
+
+  const band = levelById(selectedLevel);
+  const visibleBanks = band.cefs.length
+    ? VOCAB_BANKS.filter((option) => band.cefs.includes(option.level))
+    : VOCAB_BANKS;
 
   // The board loads this into the typing store itself, and the guard that makes that write
   // safe in a render lives there. The card above is rendered from `currentItem` directly, so
@@ -74,45 +104,81 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
       </div>
 
       {/* Word Bank Category Selector Tabs */}
-      <div className="mb-8 flex flex-wrap gap-2 justify-center">
-        {VOCAB_BANKS.map((option) => {
-          const isActive = bank.slug === option.slug;
-          return (
-            <button
-              key={option.slug}
-              type="button"
-              onClick={() => router.replace(`/vocab?bank=${option.slug}`)}
-              /* `aria-pressed`. The URL carries which bank is open — see `useLinkedBank` —
-                * and this carries what a screen reader hears, which is the half that was
-                * missing: the tab swapped `bg-indigo-600` for `bg-gray-200` and announced
-                * itself as a plain button either way. Same fix as the category pills on the
-                * story catalog, and `test/selectionState.test.ts` is what stops a third
-                * one appearing. */
-              aria-pressed={isActive}
-              className={`flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition shadow-sm ${
-                isActive
-                  ? 'border-indigo-600 bg-indigo-600 text-white'
-                  : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300'
-              }`}
-            >
-              <span>{option.iconEmoji}</span>
-              <span>{option.title}</span>
-              {/* The level, on the tab, in the same place the story catalog puts it on a
-                * card. It is a judgement about the words (see `VocabCategory.level`), so it
-                * is printed where a learner chooses rather than inferred from the title —
-                * "Core Foundation" is a bank name, not a difficulty claim. */}
-              <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+      <div className="mb-8 flex flex-col items-center gap-3">
+        {/* The level filter, the story catalog's control for the same judgement — and the
+          * same `aria-label` wording, since the two answers mean the same thing. Default
+          * `all`, so the page opens with every bank on it as it always has. No
+          * `focus:outline-none`, and no border-colour replacement either: on a `<select>`
+          * neither leaves any indication of where the keyboard is. See
+          * test/focusVisible.test.ts. */}
+        <div className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300">
+          <Filter className="h-3.5 w-3.5 text-indigo-500" />
+          <select
+            aria-label="Filter word banks by proficiency level"
+            value={selectedLevel}
+            onChange={(e) => setSelectedLevel(e.target.value)}
+            className="bg-transparent font-medium"
+          >
+            {LEVELS.map((lvl) => (
+              <option key={lvl.id} value={lvl.id}>
+                {lvl.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap gap-2 justify-center">
+          {visibleBanks.map((option) => {
+            const isActive = bank.slug === option.slug;
+            return (
+              <button
+                key={option.slug}
+                type="button"
+                onClick={() => router.replace(`/vocab?bank=${option.slug}`)}
+                /* `aria-pressed`. The URL carries which bank is open — see `useLinkedBank` —
+                  * and this carries what a screen reader hears, which is the half that was
+                  * missing: the tab swapped `bg-indigo-600` for `bg-gray-200` and announced
+                  * itself as a plain button either way. Same fix as the category pills on the
+                  * story catalog, and `test/selectionState.test.ts` is what stops a third
+                  * one appearing. */
+                aria-pressed={isActive}
+                className={`flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition shadow-sm ${
                   isActive
-                    ? 'bg-indigo-500 text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300'
                 }`}
               >
-                {option.level}
-              </span>
-            </button>
-          );
-        })}
+                <span>{option.iconEmoji}</span>
+                <span>{option.title}</span>
+                {/* The level, on the tab, in the same place the story catalog puts it on a
+                  * card. It is a judgement about the words (see `VocabCategory.level`), so it
+                  * is printed where a learner chooses rather than inferred from the title —
+                  * "Core Foundation" is a bank name, not a difficulty claim. */}
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                    isActive
+                      ? 'bg-indigo-500 text-white'
+                      : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                  }`}
+                >
+                  {option.level}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* A band with no bank in it is reachable — no bank is tagged C1 or C2 — and the
+          * tab bar is how a learner picks a bank, so an empty one leaves the drill below
+          * with no way to reach it and no word saying why. The levels are read off
+          * `VOCAB_BANKS` rather than written here, so the line answers the question that
+          * was actually asked: which band do these banks belong to. */}
+        {visibleBanks.length === 0 && (
+          <p role="status" className="text-sm text-gray-500 dark:text-gray-400">
+            No word banks are tagged {band.label}. The banks on this page are{' '}
+            {[...new Set(VOCAB_BANKS.map((option) => option.level))].sort().join(', ')}.
+          </p>
+        )}
       </div>
 
       {/* Active Word Card & Phonetic Card */}
