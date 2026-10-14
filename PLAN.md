@@ -22,8 +22,11 @@ not to pretend the phases were planned.
   `502`, the FAQ accordion and the reading-time sort all described things that were not
   true; each was corrected or dropped.
 
-799 unit tests. The end-to-end suite is written and has never run: it needs Chrome's
-`--no-sandbox`, which is not authorised on this machine.
+808 unit tests, all passing. The end-to-end suite ran here on the first attempt — 12 of
+its 13 journeys pass, and one fails reproducibly: `typing flow > records the passage once,
+however many pages the learner visits`, which asserts one session in
+`typestory_user_stats_v1` after visiting two more routes and finds two. Chrome's
+`--no-sandbox` is not the obstacle here; the suite already passes it itself.
 
 ---
 
