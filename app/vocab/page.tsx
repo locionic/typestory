@@ -1,10 +1,11 @@
 'use client';
 
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { VOCAB_BANKS, VocabCategory } from '../../data/vocab';
 import TypingEngine from '../../components/typing/TypingEngine';
-import { Bookmark, Volume2, ChevronRight, ChevronLeft } from 'lucide-react';
+import VocabTabs from '../../components/vocab-tabs';
+import { Bookmark, Volume2, ChevronRight, ChevronLeft, Filter } from 'lucide-react';
 import { soundEngine } from '../../lib/audio';
 
 /**
@@ -34,9 +35,29 @@ function useLinkedBank(): VocabCategory {
   return VOCAB_BANKS.find((bank) => bank.slug === wanted) ?? VOCAB_BANKS[0];
 }
 
+/** CEFR level filter options, matching the stories catalog. */
+const LEVELS = [
+  { id: 'all', label: 'All Levels' },
+  { id: 'beginner', label: 'Beginner (A1-A2)' },
+  { id: 'intermediate', label: 'Intermediate (B1-B2)' },
+  { id: 'advanced', label: 'Advanced (C1-C2)' },
+] as const;
+
 function VocabDrill({ bank }: { bank: VocabCategory }) {
   const router = useRouter();
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
+  const [selectedLevel, setSelectedLevel] = useState<'all' | 'beginner' | 'intermediate' | 'advanced'>('all');
+
+  const filteredBanks = useMemo(() => {
+    return VOCAB_BANKS.filter((option) => {
+      if (selectedLevel === 'all') return true;
+      if (selectedLevel === 'beginner') return option.level === 'A1' || option.level === 'A2';
+      if (selectedLevel === 'intermediate') return option.level === 'B1' || option.level === 'B2';
+      if (selectedLevel === 'advanced') return option.level === 'C1' || option.level === 'C2';
+      return true;
+    });
+  }, [selectedLevel]);
+
   const words = bank.words;
   const currentItem = words[currentWordIndex] || words[0];
 
@@ -63,7 +84,7 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
       <div className="mb-8 text-center">
         <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1 text-xs font-bold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 mb-3">
           <Bookmark className="h-3.5 w-3.5" />
-          <span>Flashcard Typing &amp; Phonetics</span>
+          <span>Flashcard Typing & Phonetics</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-black text-gray-900 dark:text-white">
           {HEADING}
@@ -74,45 +95,25 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
       </div>
 
       {/* Word Bank Category Selector Tabs */}
-      <div className="mb-8 flex flex-wrap gap-2 justify-center">
-        {VOCAB_BANKS.map((option) => {
-          const isActive = bank.slug === option.slug;
-          return (
-            <button
-              key={option.slug}
-              type="button"
-              onClick={() => router.replace(`/vocab?bank=${option.slug}`)}
-              /* `aria-pressed`. The URL carries which bank is open — see `useLinkedBank` —
-                * and this carries what a screen reader hears, which is the half that was
-                * missing: the tab swapped `bg-indigo-600` for `bg-gray-200` and announced
-                * itself as a plain button either way. Same fix as the category pills on the
-                * story catalog, and `test/selectionState.test.ts` is what stops a third
-                * one appearing. */
-              aria-pressed={isActive}
-              className={`flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-xs font-bold transition shadow-sm ${
-                isActive
-                  ? 'border-indigo-600 bg-indigo-600 text-white'
-                  : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300'
-              }`}
-            >
-              <span>{option.iconEmoji}</span>
-              <span>{option.title}</span>
-              {/* The level, on the tab, in the same place the story catalog puts it on a
-                * card. It is a judgement about the words (see `VocabCategory.level`), so it
-                * is printed where a learner chooses rather than inferred from the title —
-                * "Core Foundation" is a bank name, not a difficulty claim. */}
-              <span
-                className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                  isActive
-                    ? 'bg-indigo-500 text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                }`}
-              >
-                {option.level}
-              </span>
-            </button>
-          );
-        })}
+      <VocabTabs bank={bank} banks={filteredBanks} />
+
+      {/* Level Filter Dropdown */}
+      <div className="mb-6 flex items-center justify-center">
+        <div className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300">
+          <Filter className="h-3.5 w-3.5 text-indigo-500" />
+          <select
+            aria-label="Filter vocabulary banks by proficiency level"
+            value={selectedLevel}
+            onChange={(e) => setSelectedLevel(e.target.value as 'all' | 'beginner' | 'intermediate' | 'advanced')}
+            className="bg-transparent font-medium"
+          >
+            {LEVELS.map((lvl) => (
+              <option key={lvl.id} value={lvl.id}>
+                {lvl.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Active Word Card & Phonetic Card */}
@@ -164,7 +165,7 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
             )}
             {currentItem.example && (
               <p className="mt-2 text-xs italic text-gray-500 border-l-2 border-indigo-200 pl-2 dark:border-indigo-800">
-                &quot;{currentItem.example}&quot;
+                "{currentItem.example}"
               </p>
             )}
           </div>

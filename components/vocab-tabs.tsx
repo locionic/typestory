@@ -1,12 +1,12 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { VOCAB_BANKS, VocabCategory } from '../data/vocab';
 import { useRouter } from 'next/navigation';
 
 interface VocabTabsProps {
   bank: VocabCategory;
+  banks?: VocabCategory[];
 }
 
 /**
@@ -15,12 +15,12 @@ interface VocabTabsProps {
  * Renders a tab for each vocabulary bank, showing the icon, title, and level.
  * Uses aria-pressed for accessibility.
  */
-export default function VocabTabs({ bank }: VocabTabsProps) {
+export default function VocabTabs({ bank, banks = VOCAB_BANKS }: VocabTabsProps) {
   const router = useRouter();
 
   return (
     <div className="mb-8 flex flex-wrap gap-2 justify-center">
-      {VOCAB_BANKS.map((option) => {
+      {banks.map((option) => {
         const isActive = bank.slug === option.slug;
         return (
           <button
