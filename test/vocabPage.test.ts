@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { useTypingStore } from '../store/useTypingStore';
 import { clearUserStats } from '../lib/stats';
 import { VOCAB_BANKS } from '../data/vocab';
+import VocabTabs from '../components/vocab-tabs';
 
 // Confetti draws to a canvas jsdom does not implement, and the engine fires it the
 // moment a passage completes.
@@ -334,6 +335,23 @@ describe('the bank tabs say which one is open', () => {
       'IELTS Academic Vocabulary': '🎓IELTS Academic VocabularyB2',
       'Developer & Tech English': '💻Developer & Tech EnglishB2',
     });
+  });
+
+  it('renders CEFR level badges on tabs when using VocabTabs directly', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    roots.push(root);
+
+    act(() => root.render(createElement(VocabTabs, { bank: VOCAB_BANKS[0] })));
+
+    for (const bank of VOCAB_BANKS) {
+      const button = tab(host, bank.title);
+      expect(button).toBeDefined();
+      expect(button.textContent).toContain(bank.level);
+    }
+    expect(pressed(host, VOCAB_BANKS[0].title)).toBe('true');
+    expect(pressed(host, VOCAB_BANKS[1].title)).toBe('false');
   });
 });
 
