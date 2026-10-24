@@ -9,6 +9,8 @@ export interface VocabItem {
   definition: string;
   translation?: string; // e.g. Vietnamese or second language
   example?: string;
+  level?: CefrLevel;
+  difficultyScore?: number;
 }
 
 export interface StoryItem {

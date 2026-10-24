@@ -1,9 +1,10 @@
 'use client';
 
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { VOCAB_BANKS, VocabCategory } from '../../data/vocab';
 import VocabTabs from '../../components/vocab-tabs';
+import CardReview, { prioritizeCardsForReview, RepetitionRating } from '../../components/card-review';
 import TypingEngine from '../../components/typing/TypingEngine';
 import { Bookmark, Volume2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { soundEngine } from '../../lib/audio';
@@ -38,7 +39,14 @@ function useLinkedBank(): VocabCategory {
 function VocabDrill({ bank }: { bank: VocabCategory }) {
   const router = useRouter();
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
-  const words = bank.words;
+  const [isQuickReview, setIsQuickReview] = useState(false);
+  const [ratings, setRatings] = useState<Record<string, RepetitionRating>>({});
+
+  const baseWords = bank.words;
+  const words = useMemo(() => {
+    return isQuickReview ? prioritizeCardsForReview(baseWords, bank.level, true) : baseWords;
+  }, [baseWords, bank.level, isQuickReview]);
+
   const currentItem = words[currentWordIndex] || words[0];
 
   // The board loads this into the typing store itself, and the guard that makes that write
@@ -56,6 +64,15 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
     if (currentWordIndex > 0) {
       setCurrentWordIndex((prev) => prev - 1);
     }
+  };
+
+  const handleToggleQuickReview = () => {
+    setCurrentWordIndex(0);
+    setIsQuickReview((prev) => !prev);
+  };
+
+  const handleRate = (rating: RepetitionRating) => {
+    setRatings((prev) => ({ ...prev, [currentItem.word]: rating }));
   };
 
   return (
@@ -79,6 +96,20 @@ function VocabDrill({ bank }: { bank: VocabCategory }) {
 
       {/* Active Word Card & Phonetic Card */}
       <div className="mb-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-8">
+        {/* Card Review & Spaced Repetition Controls */}
+        <div className="mb-6 border-b border-gray-100 pb-4 dark:border-gray-800">
+          <CardReview
+            bank={bank}
+            currentItem={currentItem}
+            currentWordIndex={currentWordIndex}
+            totalWords={words.length}
+            isQuickReview={isQuickReview}
+            onToggleQuickReview={handleToggleQuickReview}
+            currentRating={ratings[currentItem.word]}
+            onRate={handleRate}
+          />
+        </div>
+
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
